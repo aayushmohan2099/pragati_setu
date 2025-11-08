@@ -9,3 +9,4 @@ django-cleanup
 openpyxl
 django-filter
 drf-yasg
+pymysql
