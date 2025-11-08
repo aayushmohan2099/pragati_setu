@@ -1,0 +1,11 @@
+Django>=4.2,<5
+djangorestframework
+djangorestframework-simplejwt
+mysqlclient
+Pillow
+django-cors-headers
+django-background-tasks
+django-cleanup
+openpyxl
+django-filter
+drf-yasg
