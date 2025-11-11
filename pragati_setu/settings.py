@@ -88,6 +88,9 @@ DATABASES = {
     }
 }
 
+# reuse DB connections for 600s
+CONN_MAX_AGE = 600
+
 # Router to keep core (master_*) read-only for this Django project
 DATABASE_ROUTERS = ['core.dbrouters.MasterDBRouter']
 
