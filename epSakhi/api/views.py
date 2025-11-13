@@ -1,4 +1,3 @@
-# epSakhi/api/views.py
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -24,13 +23,16 @@ class CRPEPViewSet(viewsets.ModelViewSet):
     ordering_fields = ['id','created_at']
 
     def get_queryset(self):
-        qs = CRPEP.objects.all().order_by('-id')
+        qs = CRPEP.objects.select_related('district', 'block', 'gram_panchayat', 'master_user').all().order_by('-id')
         user = self.request.user
         try:
             mu = MasterUser.objects.get(username=user.username)
-            if mu.role == 'crp_ep':
+            # mu.role is FK -> MasterRoles; compare role name
+            role_name = mu.get_role_name() or ''
+            if role_name == 'crp_ep':
                 qs = qs.filter(master_user_id=mu.id)
         except Exception:
+            # keep original behaviour / fail-safe: return qs unfiltered
             pass
         return qs
 
@@ -52,7 +54,9 @@ class CRPEPViewSet(viewsets.ModelViewSet):
         writer = csv.writer(buffer)
         writer.writerow(['id','name','district_id','block_id','panchayat_id','shg_code','mobile_number','category','marks_obtained'])
         for r in qs:
-            writer.writerow([r.id, r.name, r.district_id, r.block_id, r.gram_panchayat_id, getattr(r, 'shg_id', ''), r.mobile_number, r.category, r.marks_obtained])
+            # use getattr for shg id which could be stored as shg_code attribute
+            shg_code = getattr(r, 'shg_id', None) or getattr(r, 'shg', None) or ''
+            writer.writerow([r.id, r.name, r.district_id, r.block_id, r.gram_panchayat_id, shg_code, r.mobile_number, r.category, r.marks_obtained])
         buffer.seek(0)
         response = StreamingHttpResponse(buffer, content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="crpep_export.csv"'
@@ -88,7 +92,8 @@ class BeneficiaryEnterpriseViewSet(viewsets.ModelViewSet):
         user = self.request.user
         try:
             mu = MasterUser.objects.get(username=user.username)
-            if mu.role == 'crp_ep':
+            role_name = mu.get_role_name() or ''
+            if role_name == 'crp_ep':
                 qs = qs.filter(recorded_by_user_id=mu.id)
         except Exception:
             pass
