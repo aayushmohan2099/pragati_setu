@@ -43,7 +43,6 @@ from core.api.serializers import (
     MasterClfDetailSerializer, MasterMembersUnderClfListSerializer,
     MasterPanchayatsUnderClfListSerializer, MasterVillagesUnderClfListSerializer,
     MasterStateSerializer, MasterMandalSerializer, MasterUserSerializer, MasterRolesSerializer,
-    MasterGeoUserScopeSerializer
 )
 
 CACHE_TTL = getattr(settings, 'CACHE_TTL', 300)
