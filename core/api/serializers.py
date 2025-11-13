@@ -257,10 +257,10 @@ class MasterRolesSerializer(serializers.ModelSerializer):
 
 
 class MasterUserSerializer(serializers.ModelSerializer):
-    role_id = serializers.IntegerField(source='role_id', read_only=True)
-    created_by = serializers.IntegerField(source='created_by_id', read_only=True)
-    updated_by = serializers.IntegerField(source='updated_by_id', read_only=True)
-    deleted_by = serializers.IntegerField(source='deleted_by_id', read_only=True)
+    role_id = serializers.IntegerField(read_only=True)
+    created_by = serializers.IntegerField(read_only=True)
+    updated_by = serializers.IntegerField(read_only=True)
+    deleted_by = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterUser
