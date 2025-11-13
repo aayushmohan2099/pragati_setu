@@ -622,7 +622,7 @@ class MasterMandalView(generics.ListAPIView):
         return qs
 
 # ----------------------------
-# User GeoScope view (unchanged)
+# User GeoScope view 
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class UserGeoScopeView(APIView):
