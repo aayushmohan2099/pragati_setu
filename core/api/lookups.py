@@ -31,19 +31,7 @@ from core.models import (
     MasterMembersUnderClf, MasterPanchayatsUnderClf, MasterVillagesUnderClf,
     MasterGeoUserScope, MasterUser, MasterRoles, MasterState, MasterMandal
 )
-from core.api.serializers import (
-    MasterDistrictListSerializer, MasterDistrictDetailSerializer,
-    MasterBlockListSerializer, MasterBlockDetailSerializer,
-    MasterPanchayatListSerializer, MasterPanchayatDetailSerializer,
-    MasterVillageListSerializer, MasterVillageDetailSerializer,
-    MasterShgListSerializer, MasterShgDetailSerializer,
-    MasterBeneficiaryListSerializer, MasterBeneficiaryDetailSerializer,
-    MasterClfListSerializer, MasterClfAddressesSerializer,
-    MasterClfBanksSerializer, MasterClfPhonesSerializer, MasterClfVoDetailsSerializer,
-    MasterClfDetailSerializer, MasterMembersUnderClfListSerializer,
-    MasterPanchayatsUnderClfListSerializer, MasterVillagesUnderClfListSerializer,
-    MasterStateSerializer, MasterMandalSerializer, MasterUserSerializer, MasterRolesSerializer,
-)
+from core.api.serializers import *
 
 CACHE_TTL = getattr(settings, 'CACHE_TTL', 300)
 
