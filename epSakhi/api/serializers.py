@@ -5,81 +5,53 @@ from core.models import (
     MasterDistrict, MasterBlock, MasterPanchayat,
     MasterShgList, MasterBeneficiary
 )
+from core.api.serializers import MasterShgListSerializer, MasterBeneficiaryListSerializer, MasterDistrictListSerializer, MasterBlockListSerializer, MasterPanchayatListSerializer
 
-
-# ---------- Basic master serializers (used by core lookups) ----------
+# For epSakhi, use lightweight list serializers for nested list usage
 class MasterDistrictSerializer(serializers.ModelSerializer):
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+
     class Meta:
         model = MasterDistrict
         fields = ['district_id', 'district_name_en', 'state_id']
 
 
 class MasterBlockSerializer(serializers.ModelSerializer):
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+
     class Meta:
         model = MasterBlock
-        fields = ['block_id', 'block_name_en', 'district_id', 'is_aspirational']
+        fields = ['block_id', 'block_name_en', 'district_id', 'state_id', 'is_aspirational']
 
 
 class MasterPanchayatSerializer(serializers.ModelSerializer):
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+
     class Meta:
         model = MasterPanchayat
         fields = ['panchayat_id', 'panchayat_name_en', 'block_id']
 
 
-# ---------- SHG list serializer (lightweight) ----------
-class MasterShgListSerializer(serializers.ModelSerializer):
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    village_id = serializers.IntegerField(source='village_id', read_only=True)
-
-    class Meta:
-        model = MasterShgList
-        fields = ['id', 'shg_code', 'name', 'block_id', 'district_id', 'village_id', 'is_active']
+class MasterShgListLightSerializer(MasterShgListSerializer):
+    class Meta(MasterShgListSerializer.Meta):
+        pass
 
 
-# ---------- SHG detail serializer (base shg fields only) ----------
-class MasterShgDetailSerializer(serializers.ModelSerializer):
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
-    village_id = serializers.IntegerField(source='village_id', read_only=True)
-
-    class Meta:
-        model = MasterShgList
-        fields = [
-            'id', 'shg_code', 'name', 'formation_date', 'latitude', 'longitude',
-            'is_active', 'block_id', 'district_id', 'panchayat_id', 'village_id'
-        ]
+class MasterBeneficiaryLightSerializer(MasterBeneficiaryListSerializer):
+    class Meta(MasterBeneficiaryListSerializer.Meta):
+        pass
 
 
-# ---------- Beneficiary list serializer (lightweight) ----------
-class MasterBeneficiarySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterBeneficiary
-        fields = ['member_code', 'member_name', 'dob', 'gender', 'shg_code']
-
-
-# ---------- Beneficiary detail serializer (base) ----------
-class MasterBeneficiaryDetailSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterBeneficiary
-        fields = [
-            'member_code', 'member_name', 'dob', 'gender', 'joining_date',
-            'shg_code', 'state_id', 'district_id', 'block_id'
-        ]
-
-
-# ---------- CRP / EP serializers ----------
 class CRPEPSerializer(serializers.ModelSerializer):
-    # read-only nested representations
+    # nested read-only lightweight fields for detail use
     district = MasterDistrictSerializer(read_only=True)
     block = MasterBlockSerializer(read_only=True)
     gram_panchayat = MasterPanchayatSerializer(read_only=True)
-    # show lightweight SHG info
-    shg = MasterShgListSerializer(read_only=True)
+    shg = MasterShgListLightSerializer(read_only=True)
     nodal_clf = serializers.PrimaryKeyRelatedField(read_only=True)
 
-    # write-only ids (for create/update)
+    # write-only id fields for create/update
     district_id = serializers.IntegerField(write_only=True, required=True)
     block_id = serializers.IntegerField(write_only=True, required=True)
     panchayat_id = serializers.IntegerField(write_only=True, required=True)
@@ -103,7 +75,6 @@ class CRPEPSerializer(serializers.ModelSerializer):
         shg_code = validated_data.pop('shg_code', None)
         master_user_id = validated_data.pop('master_user_id', None)
 
-        # Build create kwargs for known model fields
         create_kwargs = {
             'district_id': district_id,
             'block_id': block_id,
@@ -114,42 +85,33 @@ class CRPEPSerializer(serializers.ModelSerializer):
             'subcategory': validated_data.get('subcategory'),
             'marks_obtained': validated_data.get('marks_obtained'),
         }
-
-        # allow optional fields if provided
         if shg_code:
-            # try to set FK id attribute safely
             create_kwargs['shg_id'] = shg_code
         if master_user_id:
             create_kwargs['master_user_id'] = master_user_id
-
         instance = CRPEP.objects.create(**create_kwargs)
         return instance
 
     def update(self, instance, validated_data):
-        # update simple fields
         for f in ['name', 'mobile_number', 'category', 'subcategory', 'marks_obtained']:
             if f in validated_data:
                 setattr(instance, f, validated_data[f])
-
-        # update related id fields if provided
         if 'district_id' in validated_data:
-            setattr(instance, 'district_id', validated_data['district_id'])
+            instance.district_id = validated_data['district_id']
         if 'block_id' in validated_data:
-            setattr(instance, 'block_id', validated_data['block_id'])
+            instance.block_id = validated_data['block_id']
         if 'panchayat_id' in validated_data:
-            setattr(instance, 'gram_panchayat_id', validated_data['panchayat_id'])
+            instance.gram_panchayat_id = validated_data['panchayat_id']
         if 'shg_code' in validated_data:
-            # use attribute name that matches model (shg_id)
-            setattr(instance, 'shg_id', validated_data['shg_code'])
+            instance.shg_id = validated_data['shg_code']
         if 'master_user_id' in validated_data:
-            setattr(instance, 'master_user_id', validated_data['master_user_id'])
-
+            instance.master_user_id = validated_data['master_user_id']
         instance.save()
         return instance
 
 
 class BeneficiaryEnterpriseSerializer(serializers.ModelSerializer):
-    beneficiary = MasterBeneficiarySerializer(read_only=True)
+    beneficiary = MasterBeneficiaryLightSerializer(read_only=True)
     beneficiary_member_code = serializers.CharField(write_only=True, required=True)
 
     class Meta:
@@ -159,7 +121,6 @@ class BeneficiaryEnterpriseSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         member_code = validated_data.pop('beneficiary_member_code')
-        # map incoming member_code to model's FK field name - commonly 'beneficiary_id'
         validated_data['beneficiary_id'] = member_code
         return super().create(validated_data)
 

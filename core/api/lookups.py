@@ -1,6 +1,5 @@
+# core/api/lookups.py
 """
-core/api/lookups.py
-
 Enhanced lookups with:
 - multi-filter support
 - search (comma-separated tokens)
@@ -9,7 +8,6 @@ Enhanced lookups with:
 - pagination: page, page_size (PageNumberPagination)
 - DB optimizations: select_related, prefetch_related, only
 - caching decorator preserved
-
 """
 
 from rest_framework import permissions, generics, pagination, status
@@ -17,10 +15,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-from django.db.models import Prefetch, Q, Count, F, IntegerField
+from django.db.models import Prefetch, Q, Count, F, IntegerField, Value
 from django.db.models.functions import ExtractYear, Now
-from django.core.paginator import Paginator
 from django.conf import settings
+from django.shortcuts import get_object_or_404
 
 from core.models import (
     MasterDistrict, MasterBlock, MasterPanchayat,
@@ -33,23 +31,23 @@ from core.models import (
     MasterMembersUnderClf, MasterPanchayatsUnderClf, MasterVillagesUnderClf,
     MasterGeoUserScope, MasterUser, MasterRoles, MasterState, MasterMandal
 )
-
 from core.api.serializers import (
-    MasterDistrictSerializer, MasterBlockSerializer,
-    MasterPanchayatSerializer, MasterShgListSerializer,
-    MasterShgDetailSerializer, MasterBeneficiarySerializer,
-    MasterBeneficiaryDetailSerializer, MasterClfDetailSerializer,
+    MasterDistrictListSerializer, MasterDistrictDetailSerializer,
+    MasterBlockListSerializer, MasterBlockDetailSerializer,
+    MasterPanchayatListSerializer, MasterPanchayatDetailSerializer,
+    MasterVillageListSerializer, MasterVillageDetailSerializer,
+    MasterShgListSerializer, MasterShgDetailSerializer,
+    MasterBeneficiaryListSerializer, MasterBeneficiaryDetailSerializer,
     MasterClfListSerializer, MasterClfAddressesSerializer,
     MasterClfBanksSerializer, MasterClfPhonesSerializer, MasterClfVoDetailsSerializer,
-    MasterMembersUnderClfSerializer, MasterPanchayatsUnderClfSerializer, MasterVillagesUnderClfSerializer,
+    MasterClfDetailSerializer, MasterMembersUnderClfListSerializer,
+    MasterPanchayatsUnderClfListSerializer, MasterVillagesUnderClfListSerializer,
     MasterStateSerializer, MasterMandalSerializer, MasterUserSerializer, MasterRolesSerializer,
-    MasterVillageSerializer, MasterGeoUserScopeSerializer
+    MasterGeoUserScopeSerializer
 )
 
-# Cache TTL seconds (default 300)
 CACHE_TTL = getattr(settings, 'CACHE_TTL', 300)
 
-# PageNumber pagination with client-settable page_size (bounded)
 class FlexiblePagination(pagination.PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
@@ -59,306 +57,231 @@ class FlexiblePagination(pagination.PageNumberPagination):
 # Helper utilities
 # --------------------------
 def parse_csv_param(val):
-    """Split comma-separated query param into a list of trimmed tokens."""
     if not val:
         return []
     return [p.strip() for p in val.split(',') if p.strip()]
 
-def apply_search(qs, request, search_fields):
-    """
-    Apply 'search' query param.
-    Behavior:
-      - request.GET['search'] may contain comma-separated tokens: token1,token2
-      - For each token, build a Q object that ORs across search_fields.
-      - Then AND all token-Qs together (so all tokens must match somewhere).
-    """
-    search_raw = request.GET.get('search', '').strip()
-    if not search_raw or not search_fields:
-        return qs
-    tokens = parse_csv_param(search_raw)
-    if not tokens:
-        return qs
-    q_total = Q()
-    for token in tokens:
-        q_token = Q()
-        for f in search_fields:
-            q_token |= Q(**{f + '__icontains': token})
-        q_total &= q_token
-    return qs.filter(q_total)
-
 def apply_filters(qs, request, allowed_filters):
-    """
-    allowed_filters: dict mapping query_param -> model_field_name (or lambda for complex)
-    Example: {'district_id': 'district_id', 'is_active':'is_active'}
-    Supports multiple filters; if query_param has comma-separated values, treat as IN.
-    """
-    for param, field in allowed_filters.items():
-        val = request.GET.get(param, None)
-        if val is None or val == '':
+    # allowed_filters: { 'query_param_name' : 'model_field_name' }
+    for qp, model_field in (allowed_filters or {}).items():
+        v = request.GET.get(qp)
+        if v is None:
             continue
-        # allow comma-separated multiple values -> IN
-        tokens = parse_csv_param(val)
-        if len(tokens) == 1:
-            qs = qs.filter(**{field: tokens[0]})
-        else:
-            qs = qs.filter(**{f"{field}__in": tokens})
-    # Range filters (created_from/created_to) handled separately by callers if needed
+        # allow comma-separated multi values -> IN filter
+        vals = parse_csv_param(v)
+        if len(vals) == 1:
+            qs = qs.filter(**{model_field: vals[0]})
+        elif len(vals) > 1:
+            qs = qs.filter(**{f"{model_field}__in": vals})
     return qs
 
-def apply_ordering(qs, request, allowed_ordering, annotate_age=False):
-    """
-    allowed_ordering: set/list of allowed ordering fields (string names).
-    Supports 'age' which must be annotated by caller (or annotate_age True will annotate).
-    ordering param: ordering=<field> or ordering=-<field>
-    """
-    ord_raw = request.GET.get('ordering', '').strip()
-    if not ord_raw:
+def apply_search(qs, request, search_fields):
+    search_q = request.GET.get('search')
+    if not search_q or not search_fields:
         return qs
-    # support comma-separated ordering: take first only (to keep simple and safe)
-    ord_field = parse_csv_param(ord_raw)[0]
-    desc = ord_field.startswith('-')
-    field_name = ord_field[1:] if desc else ord_field
-    if field_name == 'age':
-        # annotate approximate age = ExtractYear(Now()) - ExtractYear(dob)
-        # Use ExtractYear for DB-side calculation
-        qs = qs.annotate(age=(ExtractYear(Now()) - ExtractYear('dob')))
-        # allowed
-        order_expr = '-age' if desc else 'age'
-        return qs.order_by(order_expr)
-    if field_name not in allowed_ordering:
+    tokens = parse_csv_param(search_q)
+    # AND across tokens; OR across fields for each token
+    for token in tokens:
+        token_q = Q()
+        for f in search_fields:
+            token_q |= Q(**{f"{f}__icontains": token})
+        qs = qs.filter(token_q)
+    return qs
+
+def apply_ordering(qs, request, allowed_ordering):
+    order_param = request.GET.get('ordering')
+    if not order_param:
         return qs
-    order_expr = ('-' + field_name) if desc else field_name
-    return qs.order_by(order_expr)
+    orderings = parse_csv_param(order_param)
+    cleaned = []
+    for o in orderings:
+        desc = o.startswith('-')
+        field = o[1:] if desc else o
+        # special computed fields
+        if field == 'age':
+            # compute age = YEAR(NOW()) - YEAR(dob) (approx)
+            qs = qs.annotate(age=ExtractYear(Now()) - ExtractYear('dob'))
+            cleaned.append(f"-age" if desc else "age")
+            continue
+        if field not in allowed_ordering:
+            continue
+        cleaned.append(o)
+    if cleaned:
+        qs = qs.order_by(*cleaned)
+    return qs
 
 def apply_group_by(qs, request, allowed_group_by, id_field='id'):
-    """
-    group_by: comma-separated allowed fields. For now we support single-field grouping primarily.
-    Returns dict with 'group_by' info if requested, else None.
-    If include_items=true, include items per group (paginated).
-    """
-    group_raw = request.GET.get('group_by', '').strip()
-    if not group_raw:
+    group_by = request.GET.get('group_by')
+    if not group_by:
         return None
-    groups = parse_csv_param(group_raw)
-    # restrict to first allowed grouping for now (safe & efficient)
-    group_field = None
-    for g in groups:
-        if g in allowed_group_by:
-            group_field = g
-            break
-    if not group_field:
+    groups = parse_csv_param(group_by)
+    # allow grouping by one or multiple allowed fields
+    chosen = [g for g in groups if g in allowed_group_by]
+    if not chosen:
         return None
-
-    include_items = request.GET.get('include_items', 'false').lower() in ('1', 'true', 'yes')
-    # Build values() group
-    agg = qs.values(group_field).annotate(count=Count(id_field)).order_by('-count')
-    result = {'group_by': group_field, 'groups': []}
-    # If include_items true, collect items for that group (bounded)
-    for bucket in agg:
-        key = bucket.get(group_field)
-        count = bucket.get('count')
-        group_entry = {'key': key, 'count': count}
-        if include_items:
-            # fetch items in that group (limit page_size to avoid huge payloads)
-            items_qs = qs.filter(**{group_field: key}).order_by()[:50]
-            # use serializer-agnostic representation: model __dict__ via values()
-            item_list = list(items_qs.values())
-            group_entry['items'] = item_list
-        result['groups'].append(group_entry)
-    return result
-
-def apply_field_projection(request, queryset):
-    """
-    If ?fields=col1,col2 passed, limit the queryset using .only() for related objects
-    and return a values() when necessary in lists. We will respect fields param for lists.
-    """
-    fields_raw = request.GET.get('fields', '').strip()
-    if not fields_raw:
-        return queryset
-    fields = parse_csv_param(fields_raw)
-    # For ORM QuerySet, .only works for model fields; prefer .values to easily return dicts.
-    return queryset.values(*fields)
-
+    # produce aggregated dict { group_key: count, ... }
+    agg = qs.values(*chosen).annotate(count=Count(id_field)).order_by(*chosen)
+    return list(agg)
 
 # ----------------------------
-# Districts (existing endpoint - enhanced)
+# Districts (list + detail)
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class DistrictListView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterDistrictSerializer
+    serializer_class = MasterDistrictListSerializer
     pagination_class = FlexiblePagination
 
-    # Allowed operations
-    SEARCH_FIELDS = ['district_name_en', 'district_name_local']
-    ALLOWED_FILTERS = {
-        'state_id': 'state_id',
-        'mandal_id': 'mandal_id',
-        'is_active': 'is_active'
-    }
-    ALLOWED_ORDERING = {'district_id', 'district_name_en', 'created_at', 'updated_at'}
-    ALLOWED_GROUP_BY = {'state_id', 'mandal_id'}
+    SEARCH_FIELDS = ['district_name_en', 'district_name_local', 'district_short_name_en']
+    ALLOWED_FILTERS = {'state_id': 'state_id', 'is_active': 'is_active'}
+    ALLOWED_ORDERING = {'district_id', 'district_name_en', 'created_at'}
 
     def get_queryset(self):
-        qs = MasterDistrict.objects.all().select_related('state', 'mandal').order_by('district_name_en')
-        # apply filters/search/ordering
+        qs = MasterDistrict.objects.all().order_by('district_name_en').only(
+            'district_id', 'district_name_en', 'district_short_name_en', 'district_name_local',
+            'district_code', 'lgd_code', 'language_id', 'created_at', 'updated_at',
+            'state_id', 'mandal_id'
+        )
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='district_id')
-        if grouped:
-            return Response(grouped)
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class DistrictDetailView(APIView):
+    permission_classes = (permissions.AllowAny,)
 
-        # optional fields projection
-        fields = request.GET.get('fields')
-        if fields:
-            qs = qs.values(*parse_csv_param(fields))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(list(page) if page is not None else list(qs))
-        return super().list(request, *args, **kwargs)
-
+    def get(self, request, district_id=None):
+        if not district_id:
+            return Response({'detail': 'district_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        district = get_object_or_404(MasterDistrict.objects.select_related('state', 'mandal'), district_id=district_id)
+        serializer = MasterDistrictDetailSerializer(district)
+        return Response(serializer.data)
 
 # ----------------------------
-# Blocks by district (existing route preserved, enhanced)
+# Blocks (list + detail)
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class BlockListView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterBlockSerializer
+    serializer_class = MasterBlockListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['block_name_en']
-    ALLOWED_FILTERS = {
-        'district_id': 'district_id',  # user's change: search by block_id primary; keep district filter also
-        'state_id': 'state_id',
-        'is_aspirational': 'is_aspirational'
-    }
-    ALLOWED_ORDERING = {'block_id', 'block_name_en', 'is_aspirational', 'created_at'}
-    ALLOWED_GROUP_BY = {'state_id', 'district_id', 'is_aspirational'}
+    SEARCH_FIELDS = ['block_name_en', 'block_name_local', 'block_code']
+    ALLOWED_FILTERS = {'district_id': 'district_id', 'state_id': 'state_id', 'is_aspirational': 'is_aspirational'}
+    ALLOWED_ORDERING = {'block_id', 'block_name_en', 'created_at'}
+    ALLOWED_GROUP_BY = {'district_id', 'is_aspirational'}
 
     def get_queryset(self):
-        # preserve existing behaviour: if district_id path param present, filter by it
-        district_id = self.kwargs.get('district_id')
-        qs = MasterBlock.objects.all().select_related('state', 'district').order_by('block_name_en')
-        if district_id:
-            qs = qs.filter(district_id=district_id)
+        # path param compatibility: /blocks/<district_id>/
+        path_district = self.kwargs.get('district_id')
+        qs = MasterBlock.objects.all().select_related('state', 'district').order_by('block_name_en').only(
+            'block_id', 'block_name_en', 'block_name_local', 'block_code', 'rural_urban_area',
+            'is_aspirational', 'created_at', 'updated_at', 'state_id', 'district_id'
+        )
+        if path_district:
+            qs = qs.filter(district_id=path_district)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='block_id')
-        if grouped:
-            return Response(grouped)
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class BlockDetailView(APIView):
+    permission_classes = (permissions.AllowAny,)
 
-        fields = request.GET.get('fields')
-        if fields:
-            qs = qs.values(*parse_csv_param(fields))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(list(page) if page is not None else list(qs))
-        return super().list(request, *args, **kwargs)
-
+    def get(self, request, block_id=None):
+        if not block_id:
+            return Response({'detail': 'block_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        block = get_object_or_404(MasterBlock.objects.select_related('state', 'district'), block_id=block_id)
+        serializer = MasterBlockDetailSerializer(block)
+        return Response(serializer.data)
 
 # ----------------------------
-# Panchayats by block (existing)
+# Panchayats (list + detail)
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class PanchayatListView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterPanchayatSerializer
+    serializer_class = MasterPanchayatListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['panchayat_name_en']
-    ALLOWED_FILTERS = {
-        'block_id': 'block_id',
-        'district_id': 'district_id',
-        'state_id': 'state_id'
-    }
+    SEARCH_FIELDS = ['panchayat_name_en', 'panchayat_name_local', 'panchayat_code']
+    ALLOWED_FILTERS = {'block_id': 'block_id', 'district_id': 'district_id', 'state_id': 'state_id'}
     ALLOWED_ORDERING = {'panchayat_id', 'panchayat_name_en', 'created_at'}
     ALLOWED_GROUP_BY = {'block_id', 'district_id'}
 
     def get_queryset(self):
-        block_id = self.kwargs.get('block_id')
-        qs = MasterPanchayat.objects.all().select_related('state', 'district', 'block').order_by('panchayat_name_en')
-        if block_id:
-            qs = qs.filter(block_id=block_id)
+        path_block = self.kwargs.get('block_id')
+        qs = MasterPanchayat.objects.all().select_related('state', 'district', 'block').order_by('panchayat_name_en').only(
+            'panchayat_id', 'panchayat_name_en', 'panchayat_name_local', 'panchayat_code',
+            'rural_urban_area', 'created_at', 'updated_at', 'state_id', 'district_id', 'block_id'
+        )
+        if path_block:
+            qs = qs.filter(block_id=path_block)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='panchayat_id')
-        if grouped:
-            return Response(grouped)
-        fields = request.GET.get('fields')
-        if fields:
-            qs = qs.values(*parse_csv_param(fields))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(list(page) if page is not None else list(qs))
-        return super().list(request, *args, **kwargs)
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class PanchayatDetailView(APIView):
+    permission_classes = (permissions.AllowAny,)
 
+    def get(self, request, panchayat_id=None):
+        if not panchayat_id:
+            return Response({'detail': 'panchayat_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        p = get_object_or_404(MasterPanchayat.objects.select_related('state', 'district', 'block'), panchayat_id=panchayat_id)
+        serializer = MasterPanchayatDetailSerializer(p)
+        return Response(serializer.data)
 
 # ----------------------------
-# Villages by panchayat (existing)
+# Villages (list + detail)
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class VillageListView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterVillageSerializer
+    serializer_class = MasterVillageListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['village_name_english']
-    ALLOWED_FILTERS = {
-        'panchayat_id': 'panchayat_id',
-        'block_id': 'block_id',
-        'district_id': 'district_id',
-        'is_active': 'is_active'
-    }
+    SEARCH_FIELDS = ['village_name_english', 'village_name_local', 'village_code']
+    ALLOWED_FILTERS = {'panchayat_id': 'panchayat_id', 'block_id': 'block_id', 'district_id': 'district_id', 'state_id': 'state_id', 'is_active': 'is_active'}
     ALLOWED_ORDERING = {'village_id', 'village_name_english', 'created_at'}
-    ALLOWED_GROUP_BY = {'block_id', 'is_active'}
+    ALLOWED_GROUP_BY = {'panchayat_id', 'block_id', 'district_id', 'is_active'}
 
     def get_queryset(self):
-        panchayat_id = self.kwargs.get('panchayat_id')
-        qs = MasterVillage.objects.all().select_related('state', 'district', 'block', 'panchayat').order_by('village_name_english')
-        if panchayat_id:
-            qs = qs.filter(panchayat_id=panchayat_id)
+        path_panchayat = self.kwargs.get('panchayat_id')
+        qs = MasterVillage.objects.all().select_related('state', 'district', 'block', 'panchayat').order_by('village_name_english').only(
+            'village_id', 'village_name_english', 'village_name_local', 'village_code', 'is_active',
+            'created_at', 'updated_at', 'state_id', 'district_id', 'block_id', 'panchayat_id'
+        )
+        if path_panchayat:
+            qs = qs.filter(panchayat_id=path_panchayat)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='village_id')
-        if grouped:
-            return Response(grouped)
-        fields = request.GET.get('fields')
-        if fields:
-            qs = qs.values(*parse_csv_param(fields))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(list(page) if page is not None else list(qs))
-        return super().list(request, *args, **kwargs)
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class VillageDetailView(APIView):
+    permission_classes = (permissions.AllowAny,)
 
+    def get(self, request, village_id=None):
+        if not village_id:
+            return Response({'detail': 'village_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        v = get_object_or_404(MasterVillage.objects.select_related('state', 'district', 'block', 'panchayat'), village_id=village_id)
+        serializer = MasterVillageDetailSerializer(v)
+        return Response(serializer.data)
 
 # ----------------------------
-# SHGs - unified endpoint
-# Old endpoints kept (shg-list/<block_id>/ and by-district) remain compatible.
-# New canonical endpoint: /api/v1/lookups/shgs/?block_id=...&district_id=...&village_id=...
+# SHG canonical list & detail
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class ShgListByBlockView(generics.ListAPIView):
     """
-    This class now acts as the unified SHG list endpoint:
-    - If block_id/district_id/village_id query params provided they filter accordingly.
-    - Keeps existing path param block_id if present (backwards-compatible).
+    Canonical SHG list endpoint: supports block_id,district_id,panchayat_id,village_id,state_id filters,
+    search, group_by (village_id,panchayat_id etc), ordering, and fields= (sparse projection).
+    Backwards-compatible path-based endpoints are supported.
     """
     permission_classes = (permissions.AllowAny,)
     serializer_class = MasterShgListSerializer
@@ -376,17 +299,15 @@ class ShgListByBlockView(generics.ListAPIView):
         'is_complete': 'is_complete'
     }
     ALLOWED_ORDERING = {'id', 'name', 'formation_date', 'is_active'}
-    # user requested adding group by village_id and panchayat_id
     ALLOWED_GROUP_BY = {'block_id', 'district_id', 'village_id', 'panchayat_id', 'is_active'}
 
     def get_queryset(self):
-        # Start base qs with related data to optimize list serialization
-        qs = MasterShgList.objects.all().select_related('state', 'district', 'block', 'panchayat', 'village').order_by('name')
-        # path param block_id (compatibility)
+        qs = MasterShgList.objects.all().select_related('state', 'district', 'block', 'panchayat', 'village').order_by('name').only(
+            'id', 'shg_code', 'name', 'formation_date', 'is_active', 'block_id', 'district_id', 'panchayat_id', 'village_id'
+        )
         path_block = self.kwargs.get('block_id')
         if path_block:
             qs = qs.filter(block_id=path_block)
-        # apply filters from query params (supports multiple together)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
@@ -405,10 +326,6 @@ class ShgListByBlockView(generics.ListAPIView):
             return self.get_paginated_response(list(page) if page is not None else list(qs))
         return super().list(request, *args, **kwargs)
 
-
-# ----------------------------
-# SHG DETAIL (combined) preserved, optimized and uses serializer
-# ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class ShgDetailView(APIView):
     permission_classes = (permissions.AllowAny,)
@@ -421,34 +338,31 @@ class ShgDetailView(APIView):
         except MasterShgList.DoesNotExist:
             return Response({'detail': 'SHG not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Fetch related sets optimized with .only()
-        addresses_qs = MasterShgAddresses.objects.filter(shg_code=shg_code).only('address_line1','address_line2','city_town','pincode','state_name','block_id','district_id','village','panchayat')
-        banks_qs = MasterShgBanks.objects.filter(shg_code=shg_code).only('account_no','bank_name','ifsc_code','is_default')
-        phones_qs = MasterShgPhone.objects.filter(shg_code=shg_code).only('phone_no','is_default')
+        addresses = list(MasterShgAddresses.objects.filter(shg_code=shg_code).only('address_line1','address_line2','city_town','pincode','state_name','block_id','district_id','village','panchayat'))
+        banks = list(MasterShgBanks.objects.filter(shg_code=shg_code).only('account_no','bank_name','ifsc_code','is_default'))
+        phones = list(MasterShgPhone.objects.filter(shg_code=shg_code).only('phone_no','is_default'))
 
         serializer = MasterShgDetailSerializer({
             'shg': shg,
-            'addresses': list(addresses_qs),
-            'banks': list(banks_qs),
-            'phones': list(phones_qs)
+            'addresses': addresses,
+            'banks': banks,
+            'phones': phones
         })
         return Response(serializer.data)
 
-
 # ----------------------------
-# Beneficiaries - unified endpoint
-# Old endpoints kept as compatibility wrappers.
-# New canonical: /api/v1/lookups/beneficiaries/?shg_code=...&block_id=...&village_id=...&... or member_code for detail
+# Beneficiaries - canonical list & detail
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class BeneficiaryListByShgView(generics.ListAPIView):
     """
-    Unified beneficiary endpoint:
-     - If 'member_code' query param provided -> return detail (combined).
-     - Otherwise return list filtered by provided params (supports multiple filters).
+    Unified beneficiaries endpoint:
+     - Query params: member_code, shg_code, block_id, district_id, village_id, panchayat_id,
+       marital_status, religion, social_category, search, ordering (including age), group_by, page,page_size,fields
+     - If 'member_code' present -> return full detail (beneficiary-detail compatible).
     """
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterBeneficiarySerializer
+    serializer_class = MasterBeneficiaryListSerializer
     pagination_class = FlexiblePagination
 
     SEARCH_FIELDS = ['member_name', 'member_code', 'nic_member_code', 'father_husband']
@@ -456,36 +370,36 @@ class BeneficiaryListByShgView(generics.ListAPIView):
         'shg_code': 'shg_code',
         'block_id': 'block_id',
         'district_id': 'district_id',
-        'village_id': 'village_id',
         'panchayat_id': 'panchayat_id',
+        'village_id': 'village_id',
         'state_id': 'state_id',
         'marital_status': 'marital_status',
         'religion': 'religion',
         'social_category': 'social_category',
-        'aadhar_verified': 'aadhar_verified'
+        'is_active': 'is_active'
     }
-    # ordering includes 'age' as requested
-    ALLOWED_ORDERING = {'member_name', 'member_code', 'dob', 'joining_date', 'age'}
-    ALLOWED_GROUP_BY = {'shg_code', 'block_id', 'district_id', 'village_id', 'panchayat_id', 'gender', 'marital_status', 'religion', 'social_category'}
+    ALLOWED_ORDERING = {'member_code', 'member_name', 'dob', 'joining_date'}
+    ALLOWED_GROUP_BY = {'shg_code', 'block_id', 'district_id', 'village_id', 'panchayat_id', 'marital_status', 'religion', 'social_category'}
 
     def get_queryset(self):
-        # base qs
-        qs = MasterBeneficiary.objects.all().select_related('state', 'district', 'block', 'panchayat', 'village').order_by('member_name')
-        # apply filters & search
+        qs = MasterBeneficiary.objects.all().select_related('state', 'district', 'block', 'panchayat', 'village').order_by('member_name').only(
+            'member_code', 'member_name', 'dob', 'gender', 'joining_date', 'shg_code', 'state_id', 'district_id', 'block_id', 'panchayat_id', 'village_id', 'marital_status', 'religion', 'social_category'
+        )
+        # path param compatibility: shg_code path
+        path_shg = self.kwargs.get('shg_code')
+        if path_shg:
+            qs = qs.filter(shg_code=path_shg)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
-        # ordering including 'age'
-        qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING, annotate_age=True)
+        qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
     def list(self, request, *args, **kwargs):
-        member_code = request.GET.get('member_code') or self.kwargs.get('shg_code') and None
-        # If member_code provided -> return combined detail via BeneficiaryDetailView behaviour
+        # if member_code query param present, return detailed combined view for single beneficiary
+        member_code = request.GET.get('member_code') or self.kwargs.get('member_code')
         if member_code:
-            # reuse BeneficiaryDetailView logic
-            from .lookups import BeneficiaryDetailView  # safe import within func to avoid circular
+            # reuse BeneficiaryDetailView code path
             return BeneficiaryDetailView().get(request, member_code=member_code)
-
         qs = self.get_queryset()
         grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='member_code')
         if grouped:
@@ -499,16 +413,11 @@ class BeneficiaryListByShgView(generics.ListAPIView):
         return super().list(request, *args, **kwargs)
 
 
-# ----------------------------
-# Beneficiary detail (combined)
-# ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class BeneficiaryDetailView(APIView):
     permission_classes = (permissions.AllowAny,)
 
     def get(self, request, member_code=None):
-        # member_code may come in URL or query param
-        member_code = member_code or request.GET.get('member_code')
         if not member_code:
             return Response({'detail': 'member_code required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -516,66 +425,22 @@ class BeneficiaryDetailView(APIView):
         except MasterBeneficiary.DoesNotExist:
             return Response({'detail': 'Beneficiary not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        addresses = MasterBeneficiaryAddress.objects.filter(member_code=member_code).only('address_line1','address_line2','address_type','city_town','postal_code')
-        banks = MasterBeneficiaryBank.objects.filter(member_code=member_code).only('account_no','ifsc_code','bank_name','is_default')
-        designations = MasterBeneficiaryDesignation.objects.filter(member_code=member_code).only('designation','is_signatory','member_name')
-        phones = MasterBeneficiaryPhone.objects.filter(member_code=member_code).only('phone_no','is_default')
+        addresses = list(MasterBeneficiaryAddress.objects.filter(member_code=member_code).only('address_line1', 'address_line2', 'address_type', 'city_town', 'postal_code'))
+        banks = list(MasterBeneficiaryBank.objects.filter(member_code=member_code).only('account_no', 'ifsc_code', 'bank_name', 'is_default'))
+        designations = list(MasterBeneficiaryDesignation.objects.filter(member_code=member_code).only('designation','is_signatory','member_name'))
+        phones = list(MasterBeneficiaryPhone.objects.filter(member_code=member_code).only('phone_no','is_default'))
 
         serializer = MasterBeneficiaryDetailSerializer({
             'beneficiary': mb,
-            'addresses': list(addresses),
-            'banks': list(banks),
-            'designations': list(designations),
-            'phones': list(phones)
+            'addresses': addresses,
+            'banks': banks,
+            'designations': designations,
+            'phones': phones
         })
         return Response(serializer.data)
 
-
 # ----------------------------
-# Beneficiaries by block & district endpoints (compatibility)
-# ----------------------------
-@method_decorator(cache_page(CACHE_TTL), name='get')
-class BeneficiaryListByBlockView(BeneficiaryListByShgView):
-    def get(self, request, block_id=None):
-        # if block_id path param provided, ensure filter is applied and call list
-        if block_id:
-            # inject into GET by creating a mutable QueryDict is messy; instead call get_queryset directly
-            self.kwargs['block_id'] = block_id
-            # fallback: filter in queryset by block_id
-            qs = self.get_queryset().filter(block_id=block_id)
-            # follow parent list implementation
-            grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='member_code')
-            if grouped:
-                return Response(grouped)
-            fields = request.GET.get('fields')
-            if fields:
-                qs = qs.values(*parse_csv_param(fields))
-                page = self.paginate_queryset(qs)
-                return self.get_paginated_response(list(page) if page is not None else list(qs))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(page)
-        return super().get(request)
-
-@method_decorator(cache_page(CACHE_TTL), name='get')
-class BeneficiaryListByDistrictView(BeneficiaryListByShgView):
-    def get(self, request, district_id=None):
-        if district_id:
-            qs = self.get_queryset().filter(district_id=district_id)
-            grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='member_code')
-            if grouped:
-                return Response(grouped)
-            fields = request.GET.get('fields')
-            if fields:
-                qs = qs.values(*parse_csv_param(fields))
-                page = self.paginate_queryset(qs)
-                return self.get_paginated_response(list(page) if page is not None else list(qs))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(page)
-        return super().get(request)
-
-
-# ----------------------------
-# CLF endpoints and detail
+# CLF list + detail + sublists
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class ClfListView(generics.ListAPIView):
@@ -595,24 +460,13 @@ class ClfListView(generics.ListAPIView):
     ALLOWED_GROUP_BY = {'district_id', 'block_id', 'pfms_verified', 'is_complete'}
 
     def get_queryset(self):
-        qs = MasterClfList.objects.all().select_related('state', 'district', 'block').order_by('name')
+        qs = MasterClfList.objects.all().select_related('state', 'district', 'block').order_by('name').only(
+            'id', 'clf_code', 'name', 'nic_code', 'formation_date', 'is_complete', 'pfms_verified', 'state_id', 'district_id', 'block_id'
+        )
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
-
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='id')
-        if grouped:
-            return Response(grouped)
-        fields = request.GET.get('fields')
-        if fields:
-            qs = qs.values(*parse_csv_param(fields))
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(list(page) if page is not None else list(qs))
-        return super().list(request, *args, **kwargs)
-
 
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class ClfDetailView(APIView):
@@ -622,133 +476,89 @@ class ClfDetailView(APIView):
         if not clf_code:
             return Response({'detail': 'clf_code required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            clf = MasterClfList.objects.select_related('state', 'district', 'block').get(clf_code=clf_code)
+            clf = MasterClfList.objects.get(clf_code=clf_code)
         except MasterClfList.DoesNotExist:
             return Response({'detail': 'CLF not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        addresses = MasterClfAddresses.objects.filter(clf_code=clf_code).only('address_line1','address_line2','city_town','postal_code')
-        banks = MasterClfBanks.objects.filter(clf_code=clf_code).only('account_no','bank_name','ifsc_code','is_default')
-        phones = MasterClfPhones.objects.filter(clf_code=clf_code).only('phone_no','is_default')
-        vo_details = MasterClfVoDetails.objects.filter(clf_code=clf_code).only('vo_code','vo_name','vo_formation_date')
+        addresses = list(MasterClfAddresses.objects.filter(clf_code=clf_code))
+        banks = list(MasterClfBanks.objects.filter(clf_code=clf_code))
+        phones = list(MasterClfPhones.objects.filter(clf_code=clf_code))
+        vo_details = list(MasterClfVoDetails.objects.filter(clf_code=clf_code))
 
         serializer = MasterClfDetailSerializer({
             'clf': clf,
-            'addresses': list(addresses),
-            'banks': list(banks),
-            'phones': list(phones),
-            'vo_details': list(vo_details)
+            'addresses': addresses,
+            'banks': banks,
+            'phones': phones,
+            'vo_details': vo_details
         })
         return Response(serializer.data)
 
-
-# ----------------------------
-# CLF-members / panchayats / villages under CLF
-# ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MembersUnderClfView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterMembersUnderClfSerializer
+    serializer_class = MasterMembersUnderClfListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['member_name', 'designation']
-    ALLOWED_FILTERS = {
-        'clf_code': 'clf_code',
-        'is_signatory': 'is_signatory'
-    }
-    ALLOWED_ORDERING = {'member_name', 'designation'}
+    SEARCH_FIELDS = ['member_name', 'member_code']
+    ALLOWED_FILTERS = {'clf_code': 'clf_code', 'is_signatory': 'is_signatory'}
+    ALLOWED_ORDERING = {'id', 'member_name'}
     ALLOWED_GROUP_BY = {'designation', 'is_signatory'}
 
     def get_queryset(self):
         clf_code = self.kwargs.get('clf_code') or self.request.GET.get('clf_code')
-        qs = MasterMembersUnderClf.objects.all().order_by('member_name')
+        qs = MasterMembersUnderClf.objects.all().only('id', 'clf_code_id', 'member_code', 'member_name', 'designation', 'is_signatory')
         if clf_code:
-            qs = qs.filter(clf_code=clf_code)
+            qs = qs.filter(clf_code__clf_code=clf_code) if isinstance(clf_code, str) and clf_code.isalpha() else qs.filter(clf_code=clf_code)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
-
 
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class PanchayatsUnderClfView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterPanchayatsUnderClfSerializer
+    serializer_class = MasterPanchayatsUnderClfListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['panchayat_name', 'panchayat_code']
+    SEARCH_FIELDS = ['panchayat_name']
     ALLOWED_FILTERS = {'clf_code': 'clf_code'}
-    ALLOWED_ORDERING = {'panchayat_name'}
-    ALLOWED_GROUP_BY = {'panchayat'}
+    ALLOWED_ORDERING = {'id', 'panchayat_name'}
+    ALLOWED_GROUP_BY = {'panchayat_code'}
 
     def get_queryset(self):
         clf_code = self.kwargs.get('clf_code') or self.request.GET.get('clf_code')
-        qs = MasterPanchayatsUnderClf.objects.all().select_related('panchayat')
+        qs = MasterPanchayatsUnderClf.objects.all().only('id', 'clf_code_id', 'panchayat', 'panchayat_code', 'panchayat_name', 'lgd_gp')
         if clf_code:
-            qs = qs.filter(clf_code=clf_code)
+            qs = qs.filter(clf_code__clf_code=clf_code) if isinstance(clf_code, str) else qs.filter(clf_code=clf_code)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
-
 
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class VillagesUnderClfView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterVillagesUnderClfSerializer
+    serializer_class = MasterVillagesUnderClfListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['village_name', 'village_code']
+    SEARCH_FIELDS = ['village_name']
     ALLOWED_FILTERS = {'clf_code': 'clf_code'}
-    ALLOWED_ORDERING = {'village_name'}
-    ALLOWED_GROUP_BY = {'village'}
+    ALLOWED_ORDERING = {'id', 'village_name'}
+    ALLOWED_GROUP_BY = {'village_code'}
 
     def get_queryset(self):
         clf_code = self.kwargs.get('clf_code') or self.request.GET.get('clf_code')
-        qs = MasterVillagesUnderClf.objects.all().select_related('village', 'panchayat')
+        qs = MasterVillagesUnderClf.objects.all().only('id', 'clf_code_id', 'panchayat', 'village', 'village_code', 'village_name', 'lgd_village')
         if clf_code:
-            qs = qs.filter(clf_code=clf_code)
+            qs = qs.filter(clf_code__clf_code=clf_code) if isinstance(clf_code, str) else qs.filter(clf_code=clf_code)
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-
 # ----------------------------
-# Geo scope of a user - preserved and enhanced using serializer
-# ----------------------------
-@method_decorator(cache_page(CACHE_TTL), name='get')
-class UserGeoScopeView(APIView):
-    permission_classes = (permissions.AllowAny,)
-
-    def get(self, request, user_id=None):
-        if user_id is None:
-            return Response({'detail': 'user_id required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            mu = MasterUser.objects.select_related('role').get(id=user_id)
-            role_name = mu.get_role_name() or ''
-        except MasterUser.DoesNotExist:
-            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        scopes = MasterGeoUserScope.objects.filter(user_id=user_id, is_active=1)
-        blocks = sorted({int(s.block_id) for s in scopes if s.block_id})
-        districts = sorted({int(s.district_id) for s in scopes if s.district_id})
-
-        role_name_lower = (role_name or '').lower()
-        response = {'user_id': user_id, 'username': mu.username, 'role': role_name, 'blocks': [], 'districts': []}
-        if role_name_lower.startswith('bmmu') or role_name_lower == 'bmmu':
-            response['blocks'] = blocks
-        elif role_name_lower.startswith('dmmu') or role_name_lower in ('dmmu', 'dc', 'dcnrlm'):
-            response['districts'] = districts
-        else:
-            response['blocks'] = blocks
-            response['districts'] = districts
-
-        return Response(response)
-
-
-# ----------------------------
-# Additional small list endpoints for roles, users, states, mandals
+# Roles / Users / State / Mandal
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MasterRolesView(generics.ListAPIView):
@@ -756,18 +566,17 @@ class MasterRolesView(generics.ListAPIView):
     serializer_class = MasterRolesSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['name', 'role_type']
+    SEARCH_FIELDS = ['name']
     ALLOWED_FILTERS = {'role_type': 'role_type'}
-    ALLOWED_ORDERING = {'id', 'name', 'created_at', 'updated_at'}
+    ALLOWED_ORDERING = {'id', 'name', 'created_at'}
     ALLOWED_GROUP_BY = {'role_type'}
 
     def get_queryset(self):
-        qs = MasterRoles.objects.all().order_by('id')
+        qs = MasterRoles.objects.all().order_by('name').only('id', 'name', 'role_type', 'created_at', 'updated_at')
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
-
 
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MasterUserListView(generics.ListAPIView):
@@ -775,18 +584,19 @@ class MasterUserListView(generics.ListAPIView):
     serializer_class = MasterUserSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['username', 'recovery_mobile', 'TH_urid']
+    SEARCH_FIELDS = ['username', 'recovery_email', 'recovery_mobile']
     ALLOWED_FILTERS = {'role_id': 'role_id', 'is_active': 'is_active'}
-    ALLOWED_ORDERING = {'id', 'username', 'last_active_on', 'created_at', 'updated_at'}
+    ALLOWED_ORDERING = {'id', 'username', 'created_at'}
     ALLOWED_GROUP_BY = {'role_id', 'is_active'}
 
     def get_queryset(self):
-        qs = MasterUser.objects.all().select_related('role').order_by('username')
+        qs = MasterUser.objects.all().select_related('role').order_by('username').only(
+            'id', 'username', 'recovery_email', 'recovery_mobile', 'role_id', 'is_active', 'created_at', 'updated_at'
+        )
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
-
 
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MasterStateView(generics.ListAPIView):
@@ -800,12 +610,11 @@ class MasterStateView(generics.ListAPIView):
     ALLOWED_GROUP_BY = {'category', 'is_active'}
 
     def get_queryset(self):
-        qs = MasterState.objects.all().order_by('state_name_en')
+        qs = MasterState.objects.all().order_by('state_name_en').only('state_id', 'state_name_en', 'state_short_name_en', 'category', 'is_active', 'created_at', 'updated_at')
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
-
 
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MasterMandalView(generics.ListAPIView):
@@ -819,8 +628,45 @@ class MasterMandalView(generics.ListAPIView):
     ALLOWED_GROUP_BY = {'created_by'}
 
     def get_queryset(self):
-        qs = MasterMandal.objects.all().select_related('created_by').order_by('name')
+        qs = MasterMandal.objects.all().select_related('created_by').order_by('name').only('id', 'name', 'th_urid', 'created_at', 'updated_at', 'created_by_id', 'updated_by_id')
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
+
+# ----------------------------
+# User GeoScope view (unchanged)
+# ----------------------------
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class UserGeoScopeView(APIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def get(self, request, user_id=None):
+        if user_id is None:
+            return Response({'detail': 'user_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            mu = MasterUser.objects.select_related('role').only('id', 'username', 'role_id').get(id=user_id)
+            role_name = mu.get_role_name() or ''
+        except MasterUser.DoesNotExist:
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        scopes = MasterGeoUserScope.objects.filter(user_id=user_id, is_active=1).only('block_id', 'district_id')
+        blocks = set()
+        districts = set()
+        for s in scopes:
+            if s.block_id:
+                blocks.add(int(s.block_id))
+            if s.district_id:
+                districts.add(int(s.district_id))
+
+        role_name_lower = (role_name or '').lower()
+        response = {'user_id': user_id, 'username': mu.username, 'role': role_name, 'blocks': [], 'districts': []}
+        if role_name_lower.startswith('bmmu') or role_name_lower == 'bmmu':
+            response['blocks'] = sorted(list(blocks))
+        elif role_name_lower.startswith('dmmu') or role_name_lower in ('dmmu', 'dc', 'dcnrlm'):
+            response['districts'] = sorted(list(districts))
+        else:
+            response['blocks'] = sorted(list(blocks))
+            response['districts'] = sorted(list(districts))
+        return Response(response)

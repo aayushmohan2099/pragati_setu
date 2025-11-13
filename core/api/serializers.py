@@ -1,39 +1,137 @@
-"""
-core/api/serializers.py
-
-Serializers for core master models.
-These serializers are intentionally "full-model" (fields='__all__') for detail endpoints,
-and lightweight versions are used for list endpoints when needed by the views.
-"""
-
+# core/api/serializers.py
 from rest_framework import serializers
 from core import models
 
+# -------------------------
+# Lightweight list serializers (return FK ids only)
+# -------------------------
 
-# ---------- Roles ----------
-class MasterRolesSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterRoles
-        fields = '__all__'
-
-
-# ---------- Users ----------
-class MasterUserSerializer(serializers.ModelSerializer):
-    role_name = serializers.SerializerMethodField()
+class MasterDistrictListSerializer(serializers.ModelSerializer):
+    # list endpoints must return FK ids only for speed
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+    mandal_id = serializers.IntegerField(source='mandal_id', read_only=True)
 
     class Meta:
-        model = models.MasterUser
-        fields = '__all__'  # return all DB fields
-        # you can limit fields via ?fields=... in the views if necessary
-
-    def get_role_name(self, obj):
-        try:
-            return obj.role.name if obj.role else None
-        except Exception:
-            return None
+        model = models.MasterDistrict
+        # choose fields that are useful in lists; include ids and names
+        fields = [
+            'district_id', 'district_name_en', 'district_short_name_en', 'district_name_local',
+            'district_code', 'lgd_code', 'language_id', 'created_at', 'updated_at',
+            'state_id', 'mandal_id'
+        ]
 
 
-# ---------- Geography (state/mandal/district/block/panchayat/village) ----------
+class MasterBlockListSerializer(serializers.ModelSerializer):
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+
+    class Meta:
+        model = models.MasterBlock
+        fields = [
+            'block_id', 'block_name_en', 'block_name_local', 'block_code',
+            'rural_urban_area', 'is_aspirational', 'created_at', 'updated_at',
+            'state_id', 'district_id'
+        ]
+
+
+class MasterPanchayatListSerializer(serializers.ModelSerializer):
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+
+    class Meta:
+        model = models.MasterPanchayat
+        fields = [
+            'panchayat_id', 'panchayat_name_en', 'panchayat_name_local', 'panchayat_code',
+            'rural_urban_area', 'created_at', 'updated_at',
+            'state_id', 'district_id', 'block_id'
+        ]
+
+
+class MasterVillageListSerializer(serializers.ModelSerializer):
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+
+    class Meta:
+        model = models.MasterVillage
+        fields = [
+            'village_id', 'village_name_english', 'village_name_local', 'village_code',
+            'is_active', 'created_at', 'updated_at',
+            'state_id', 'district_id', 'block_id', 'panchayat_id'
+        ]
+
+
+class MasterShgListSerializer(serializers.ModelSerializer):
+    # list returns FK ids only
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+    village_id = serializers.IntegerField(source='village_id', read_only=True)
+
+    class Meta:
+        model = models.MasterShgList
+        fields = [
+            'id', 'shg_code', 'name', 'formation_date', 'is_active',
+            'block_id', 'district_id', 'panchayat_id', 'village_id'
+        ]
+
+
+class MasterBeneficiaryListSerializer(serializers.ModelSerializer):
+    shg_code = serializers.CharField(source='shg_code', read_only=True)
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+    village_id = serializers.IntegerField(source='village_id', read_only=True)
+
+    class Meta:
+        model = models.MasterBeneficiary
+        fields = [
+            'member_code', 'member_name', 'dob', 'gender', 'joining_date',
+            'shg_code', 'state_id', 'district_id', 'block_id', 'panchayat_id', 'village_id',
+            'marital_status', 'religion', 'social_category'
+        ]
+
+
+class MasterClfListSerializer(serializers.ModelSerializer):
+    state_id = serializers.IntegerField(source='state_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+
+    class Meta:
+        model = models.MasterClfList
+        fields = ['id', 'clf_code', 'name', 'nic_code', 'formation_date', 'is_complete', 'pfms_verified', 'state_id', 'district_id', 'block_id']
+
+
+class MasterMembersUnderClfListSerializer(serializers.ModelSerializer):
+    clf_code = serializers.CharField(source='clf_code', read_only=True)
+    class Meta:
+        model = models.MasterMembersUnderClf
+        fields = ['id', 'clf_code', 'member_code', 'member_name', 'designation', 'is_signatory']
+
+
+class MasterPanchayatsUnderClfListSerializer(serializers.ModelSerializer):
+    clf_code = serializers.CharField(source='clf_code', read_only=True)
+    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+    class Meta:
+        model = models.MasterPanchayatsUnderClf
+        fields = ['id', 'clf_code', 'panchayat_id', 'panchayat_code', 'panchayat_name', 'lgd_gp']
+
+
+class MasterVillagesUnderClfListSerializer(serializers.ModelSerializer):
+    clf_code = serializers.CharField(source='clf_code', read_only=True)
+    village_id = serializers.IntegerField(source='village_id', read_only=True)
+    class Meta:
+        model = models.MasterVillagesUnderClf
+        fields = ['id', 'clf_code', 'panchayat', 'village', 'village_code', 'village_name', 'lgd_village']
+
+
+# -------------------------
+# Detail serializers (return everything, nested objects included)
+# -------------------------
+
 class MasterStateSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.MasterState
@@ -41,12 +139,17 @@ class MasterStateSerializer(serializers.ModelSerializer):
 
 
 class MasterMandalSerializer(serializers.ModelSerializer):
+    created_by = serializers.IntegerField(source='created_by_id', read_only=True)
+    updated_by = serializers.IntegerField(source='updated_by_id', read_only=True)
+    deleted_by = serializers.IntegerField(source='deleted_by_id', read_only=True)
+
     class Meta:
         model = models.MasterMandal
         fields = '__all__'
 
 
-class MasterDistrictSerializer(serializers.ModelSerializer):
+class MasterDistrictDetailSerializer(serializers.ModelSerializer):
+    # nested state & mandal fully for detail endpoint
     state = MasterStateSerializer(read_only=True)
     mandal = MasterMandalSerializer(read_only=True)
 
@@ -55,40 +158,57 @@ class MasterDistrictSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class MasterBlockSerializer(serializers.ModelSerializer):
+class MasterBlockDetailSerializer(serializers.ModelSerializer):
     state = MasterStateSerializer(read_only=True)
-    district = MasterDistrictSerializer(read_only=True)
+    district = MasterDistrictDetailSerializer(read_only=True)
 
     class Meta:
         model = models.MasterBlock
         fields = '__all__'
 
 
-class MasterPanchayatSerializer(serializers.ModelSerializer):
+class MasterPanchayatDetailSerializer(serializers.ModelSerializer):
     state = MasterStateSerializer(read_only=True)
-    district = MasterDistrictSerializer(read_only=True)
-    block = MasterBlockSerializer(read_only=True)
+    district = MasterDistrictDetailSerializer(read_only=True)
+    block = MasterBlockDetailSerializer(read_only=True)
 
     class Meta:
         model = models.MasterPanchayat
         fields = '__all__'
 
 
-class MasterVillageSerializer(serializers.ModelSerializer):
+class MasterVillageDetailSerializer(serializers.ModelSerializer):
     state = MasterStateSerializer(read_only=True)
-    district = MasterDistrictSerializer(read_only=True)
-    block = MasterBlockSerializer(read_only=True)
-    panchayat = MasterPanchayatSerializer(read_only=True)
+    district = MasterDistrictDetailSerializer(read_only=True)
+    block = MasterBlockDetailSerializer(read_only=True)
+    panchayat = MasterPanchayatDetailSerializer(read_only=True)
 
     class Meta:
         model = models.MasterVillage
         fields = '__all__'
 
 
-# ---------- CLF (list + related) ----------
-class MasterClfListSerializer(serializers.ModelSerializer):
+class MasterShgDetailSerializer(serializers.ModelSerializer):
+    state = MasterStateSerializer(read_only=True)
+    district = MasterDistrictDetailSerializer(read_only=True)
+    block = MasterBlockDetailSerializer(read_only=True)
+    panchayat = MasterPanchayatDetailSerializer(read_only=True)
+    village = MasterVillageDetailSerializer(read_only=True)
+
     class Meta:
-        model = models.MasterClfList
+        model = models.MasterShgList
+        fields = '__all__'
+
+
+class MasterBeneficiaryDetailSerializer(serializers.ModelSerializer):
+    state = MasterStateSerializer(read_only=True)
+    district = MasterDistrictDetailSerializer(read_only=True)
+    block = MasterBlockDetailSerializer(read_only=True)
+    panchayat = MasterPanchayatDetailSerializer(read_only=True)
+    village = MasterVillageDetailSerializer(read_only=True)
+
+    class Meta:
+        model = models.MasterBeneficiary
         fields = '__all__'
 
 
@@ -117,9 +237,6 @@ class MasterClfVoDetailsSerializer(serializers.ModelSerializer):
 
 
 class MasterClfDetailSerializer(serializers.Serializer):
-    """
-    Combined CLF detail serializer response (not a ModelSerializer) to return masterclf + related arrays.
-    """
     clf = MasterClfListSerializer()
     addresses = MasterClfAddressesSerializer(many=True)
     banks = MasterClfBanksSerializer(many=True)
@@ -127,99 +244,19 @@ class MasterClfDetailSerializer(serializers.Serializer):
     vo_details = MasterClfVoDetailsSerializer(many=True)
 
 
-# ---------- CLF-related small lists ----------
-class MasterMembersUnderClfSerializer(serializers.ModelSerializer):
+# Roles & Users (detail)
+class MasterRolesSerializer(serializers.ModelSerializer):
     class Meta:
-        model = models.MasterMembersUnderClf
+        model = models.MasterRoles
         fields = '__all__'
 
 
-class MasterPanchayatsUnderClfSerializer(serializers.ModelSerializer):
+class MasterUserSerializer(serializers.ModelSerializer):
+    role_id = serializers.IntegerField(source='role_id', read_only=True)
+    created_by = serializers.IntegerField(source='created_by_id', read_only=True)
+    updated_by = serializers.IntegerField(source='updated_by_id', read_only=True)
+    deleted_by = serializers.IntegerField(source='deleted_by_id', read_only=True)
+
     class Meta:
-        model = models.MasterPanchayatsUnderClf
-        fields = '__all__'
-
-
-class MasterVillagesUnderClfSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterVillagesUnderClf
-        fields = '__all__'
-
-
-# ---------- SHG (list + detail) ----------
-class MasterShgListSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterShgList
-        # list usage will often use only a subset, views will call .only(); here we expose all for detail
-        fields = '__all__'
-
-
-class MasterShgAddressesSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterShgAddresses
-        fields = '__all__'
-
-
-class MasterShgBanksSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterShgBanks
-        fields = '__all__'
-
-
-class MasterShgPhoneSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterShgPhone
-        fields = '__all__'
-
-
-class MasterShgDetailSerializer(serializers.Serializer):
-    shg = MasterShgListSerializer()
-    addresses = MasterShgAddressesSerializer(many=True)
-    banks = MasterShgBanksSerializer(many=True)
-    phones = MasterShgPhoneSerializer(many=True)
-
-
-# ---------- Beneficiaries ----------
-class MasterBeneficiarySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterBeneficiary
-        fields = '__all__'
-
-
-class MasterBeneficiaryAddressSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterBeneficiaryAddress
-        fields = '__all__'
-
-
-class MasterBeneficiaryBankSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterBeneficiaryBank
-        fields = '__all__'
-
-
-class MasterBeneficiaryDesignationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterBeneficiaryDesignation
-        fields = '__all__'
-
-
-class MasterBeneficiaryPhoneSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterBeneficiaryPhone
-        fields = '__all__'
-
-
-class MasterBeneficiaryDetailSerializer(serializers.Serializer):
-    beneficiary = MasterBeneficiarySerializer()
-    addresses = MasterBeneficiaryAddressSerializer(many=True)
-    banks = MasterBeneficiaryBankSerializer(many=True)
-    designations = MasterBeneficiaryDesignationSerializer(many=True)
-    phones = MasterBeneficiaryPhoneSerializer(many=True)
-
-
-# ---------- Geo user scope ----------
-class MasterGeoUserScopeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MasterGeoUserScope
+        model = models.MasterUser
         fields = '__all__'
