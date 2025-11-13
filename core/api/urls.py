@@ -32,8 +32,6 @@ urlpatterns = [
     path('beneficiary-list/<str:shg_code>/', BeneficiaryListByShgView.as_view(), name='beneficiary-list'),
     path('beneficiaries/', BeneficiaryListByShgView.as_view(), name='beneficiaries-canonical'),
     path('beneficiary-detail/<str:member_code>/', BeneficiaryDetailView.as_view(), name='beneficiary-detail'),
-    path('beneficiaries/by-block/<int:block_id>/', BeneficiaryListByBlockView.as_view(), name='beneficiaries-by-block'),
-    path('beneficiaries/by-district/<int:district_id>/', BeneficiaryListByDistrictView.as_view(), name='beneficiaries-by-district'),
 
     # CLF
     path('clf-list/', ClfListView.as_view(), name='clf-list'),
