@@ -1,32 +1,56 @@
 # epSakhi/api/serializers.py
 from rest_framework import serializers
 from epSakhi.models import CRPEP, BeneficiaryEnterprise
-from core.models import MasterDistrict, MasterBlock, MasterPanchayat, MasterShgList, MasterBeneficiary
+from core.models import *
 
+# ---------- Basic master serializers (used by core lookups) ----------
 class MasterDistrictSerializer(serializers.ModelSerializer):
     class Meta:
         model = MasterDistrict
-        fields = ['district_id','district_name_en','district_short_name_en']
+        fields = ['district_id', 'district_name_en', 'state_id']
 
 class MasterBlockSerializer(serializers.ModelSerializer):
     class Meta:
         model = MasterBlock
-        fields = ['block_id','block_name_en','district_id']
+        fields = ['block_id', 'block_name_en', 'district_id', 'is_aspirational']
 
 class MasterPanchayatSerializer(serializers.ModelSerializer):
     class Meta:
         model = MasterPanchayat
-        fields = ['panchayat_id','panchayat_name_en','block_id','district_id']
+        fields = ['panchayat_id', 'panchayat_name_en', 'block_id']
 
-class MasterShgSerializer(serializers.ModelSerializer):
+# ---------- SHG list serializer (lightweight) ----------
+class MasterShgListSerializer(serializers.ModelSerializer):
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    village_id = serializers.IntegerField(source='village_id', read_only=True)
+
     class Meta:
         model = MasterShgList
-        fields = ['id','shg_code','name','village_id','panchayat_id','block_id']
+        fields = ['id', 'shg_code', 'name', 'block_id', 'district_id', 'village_id', 'is_active']
 
+# ---------- SHG detail serializer (base shg fields only) ----------
+class MasterShgDetailSerializer(serializers.ModelSerializer):
+    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+    village_id = serializers.IntegerField(source='village_id', read_only=True)
+
+    class Meta:
+        model = MasterShgList
+        fields = ['id', 'shg_code', 'name', 'formation_date', 'latitude', 'longitude', 'is_active', 'block_id', 'district_id', 'panchayat_id', 'village_id']
+
+# ---------- Beneficiary list serializer (lightweight) ----------
 class MasterBeneficiarySerializer(serializers.ModelSerializer):
     class Meta:
         model = MasterBeneficiary
-        fields = ['member_code','member_name','shg_code','village_id','panchayat_id','block_id']
+        fields = ['member_code', 'member_name', 'dob', 'gender', 'shg_code']
+
+# ---------- Beneficiary detail serializer (base) ----------
+class MasterBeneficiaryDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MasterBeneficiary
+        fields = ['member_code', 'member_name', 'dob', 'gender', 'joining_date', 'shg_code', 'state_id', 'district_id', 'block_id']
 
 class CRPEPSerializer(serializers.ModelSerializer):
     district = MasterDistrictSerializer(read_only=True)
