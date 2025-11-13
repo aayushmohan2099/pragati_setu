@@ -1,4 +1,3 @@
-# core/api/serializers.py
 from rest_framework import serializers
 from core import models
 
@@ -8,8 +7,8 @@ from core import models
 
 class MasterDistrictListSerializer(serializers.ModelSerializer):
     # list endpoints must return FK ids only for speed
-    state_id = serializers.IntegerField(source='state_id', read_only=True)
-    mandal_id = serializers.IntegerField(source='mandal_id', read_only=True)
+    state_id = serializers.IntegerField(read_only=True)
+    mandal_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterDistrict
@@ -22,8 +21,8 @@ class MasterDistrictListSerializer(serializers.ModelSerializer):
 
 
 class MasterBlockListSerializer(serializers.ModelSerializer):
-    state_id = serializers.IntegerField(source='state_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
+    state_id = serializers.IntegerField(read_only=True)
+    district_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterBlock
@@ -35,9 +34,9 @@ class MasterBlockListSerializer(serializers.ModelSerializer):
 
 
 class MasterPanchayatListSerializer(serializers.ModelSerializer):
-    state_id = serializers.IntegerField(source='state_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    state_id = serializers.IntegerField(read_only=True)
+    district_id = serializers.IntegerField(read_only=True)
+    block_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterPanchayat
@@ -49,10 +48,10 @@ class MasterPanchayatListSerializer(serializers.ModelSerializer):
 
 
 class MasterVillageListSerializer(serializers.ModelSerializer):
-    state_id = serializers.IntegerField(source='state_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
-    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+    state_id = serializers.IntegerField(read_only=True)
+    district_id = serializers.IntegerField(read_only=True)
+    block_id = serializers.IntegerField(read_only=True)
+    panchayat_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterVillage
@@ -65,10 +64,10 @@ class MasterVillageListSerializer(serializers.ModelSerializer):
 
 class MasterShgListSerializer(serializers.ModelSerializer):
     # list returns FK ids only
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
-    village_id = serializers.IntegerField(source='village_id', read_only=True)
+    block_id = serializers.IntegerField(read_only=True)
+    district_id = serializers.IntegerField(read_only=True)
+    panchayat_id = serializers.IntegerField(read_only=True)
+    village_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterShgList
@@ -79,12 +78,12 @@ class MasterShgListSerializer(serializers.ModelSerializer):
 
 
 class MasterBeneficiaryListSerializer(serializers.ModelSerializer):
-    shg_code = serializers.CharField(source='shg_code', read_only=True)
-    state_id = serializers.IntegerField(source='state_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
-    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
-    village_id = serializers.IntegerField(source='village_id', read_only=True)
+    shg_code = serializers.CharField(read_only=True)
+    state_id = serializers.IntegerField(read_only=True)
+    district_id = serializers.IntegerField(read_only=True)
+    block_id = serializers.IntegerField(read_only=True)
+    panchayat_id = serializers.IntegerField(read_only=True)
+    village_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterBeneficiary
@@ -96,9 +95,9 @@ class MasterBeneficiaryListSerializer(serializers.ModelSerializer):
 
 
 class MasterClfListSerializer(serializers.ModelSerializer):
-    state_id = serializers.IntegerField(source='state_id', read_only=True)
-    district_id = serializers.IntegerField(source='district_id', read_only=True)
-    block_id = serializers.IntegerField(source='block_id', read_only=True)
+    state_id = serializers.IntegerField(read_only=True)
+    district_id = serializers.IntegerField(read_only=True)
+    block_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = models.MasterClfList
@@ -106,26 +105,32 @@ class MasterClfListSerializer(serializers.ModelSerializer):
 
 
 class MasterMembersUnderClfListSerializer(serializers.ModelSerializer):
-    clf_code = serializers.CharField(source='clf_code', read_only=True)
+    clf_code = serializers.CharField(read_only=True)
+
     class Meta:
         model = models.MasterMembersUnderClf
         fields = ['id', 'clf_code', 'member_code', 'member_name', 'designation', 'is_signatory']
 
 
 class MasterPanchayatsUnderClfListSerializer(serializers.ModelSerializer):
-    clf_code = serializers.CharField(source='clf_code', read_only=True)
-    panchayat_id = serializers.IntegerField(source='panchayat_id', read_only=True)
+    clf_code = serializers.CharField(read_only=True)
+    panchayat_id = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = models.MasterPanchayatsUnderClf
+        # return panchayat_id (fk id) rather than nested object in list
         fields = ['id', 'clf_code', 'panchayat_id', 'panchayat_code', 'panchayat_name', 'lgd_gp']
 
 
 class MasterVillagesUnderClfListSerializer(serializers.ModelSerializer):
-    clf_code = serializers.CharField(source='clf_code', read_only=True)
-    village_id = serializers.IntegerField(source='village_id', read_only=True)
+    clf_code = serializers.CharField(read_only=True)
+    panchayat_id = serializers.IntegerField(read_only=True)
+    village_id = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = models.MasterVillagesUnderClf
-        fields = ['id', 'clf_code', 'panchayat', 'village', 'village_code', 'village_name', 'lgd_village']
+        # list shows ids for speed
+        fields = ['id', 'clf_code', 'panchayat_id', 'village_id', 'village_code', 'village_name', 'lgd_village']
 
 
 # -------------------------
