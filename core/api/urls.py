@@ -1,16 +1,6 @@
 # core/api/urls.py
 from django.urls import path
-from .lookups import (
-    DistrictListView, DistrictDetailView,
-    BlockListView, BlockDetailView,
-    PanchayatListView, PanchayatDetailView,
-    VillageListView, VillageDetailView,
-    ShgListByBlockView, ShgDetailView,
-    BeneficiaryListByShgView, BeneficiaryDetailView, BeneficiaryListByBlockView, BeneficiaryListByDistrictView,
-    UserGeoScopeView,
-    ClfListView, ClfDetailView, MembersUnderClfView, PanchayatsUnderClfView, VillagesUnderClfView,
-    MasterRolesView, MasterUserListView, MasterStateView, MasterMandalView
-)
+from .lookups import *
 
 urlpatterns = [
     # Districts
