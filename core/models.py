@@ -320,7 +320,6 @@ class MasterShgList(models.Model):
     created_date = models.DateTimeField(blank=True, null=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
     updated_date = models.DateTimeField(blank=True, null=True)
-    guid = models.CharField(max_length=100, blank=True, null=True)
     is_active = models.IntegerField(blank=True, null=True)
 
     class Meta:
