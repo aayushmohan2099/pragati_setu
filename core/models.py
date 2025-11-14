@@ -303,7 +303,6 @@ class MasterClfVoDetails(models.Model):
 class MasterShgList(models.Model):
     id = models.BigAutoField(primary_key=True)
     shg_code = models.CharField(unique=True, max_length=100)
-    code = models.CharField(max_length=100, blank=True, null=True)
     block = models.ForeignKey(MasterBlock, on_delete=models.DO_NOTHING, blank=True, null=True)
     district = models.ForeignKey(MasterDistrict, on_delete=models.DO_NOTHING, blank=True, null=True)
     panchayat = models.ForeignKey(MasterPanchayat, on_delete=models.DO_NOTHING, blank=True, null=True)
@@ -330,6 +329,13 @@ class MasterShgList(models.Model):
 
     def __str__(self):
         return self.name or self.shg_code
+
+    @property
+    def code(self):
+        """
+        Backwards-compatible attribute so `obj.code` works even though DB column is `shg_code`.
+        """
+        return self.shg_code
 
 
 class MasterShgAddresses(models.Model):
