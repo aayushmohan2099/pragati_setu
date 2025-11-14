@@ -162,6 +162,10 @@ SIMPLE_JWT = {
 # CORS
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-api-id',
+    'x-api-key',
+]
 
 # Upload limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
