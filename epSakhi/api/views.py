@@ -7,6 +7,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from core.models import MasterUser
 from epSakhi.models import (
     CRPEP, BeneficiaryRecorded, ExistingEnterprise, NewEnterprise,
     EnterpriseLoanDetail, EnterpriseSupportDetail, EnterpriseTrainingReq, EnterpriseMedia
@@ -18,9 +19,31 @@ from .serializers import (
 from django.db.models import Q
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
+from django.db import transaction
+from django.http import StreamingHttpResponse
+import csv
+from io import StringIO
+from django.db.models import Prefetch
 
 # cache ttl in seconds
+CACHE_TTL = getattr(settings, 'CACHE_TTL', 60 * 5)
 SHG_CACHE_TTL = getattr(settings, 'SHG_CACHE_TTL', 60*5)  # default 5 minutes
+
+class BaseProjectionMixin:
+    """
+    Allows list endpoints to accept ?fields=col1,col2 and return .values(...) directly (fast).
+    """
+
+    def apply_fields_projection(self, request, qs):
+        fields = request.GET.get('fields')
+        if not fields:
+            return qs
+        cols = [f.strip() for f in fields.split(',') if f.strip()]
+        if not cols:
+            return qs
+        # If fields include related names, leave them out (we only support model columns here)
+        # Return a ValuesQuerySet for speed
+        return qs.values(*cols)
 
 # Helper to call APISETU
 def _call_apisetu_shg_list(block_id):
@@ -242,6 +265,152 @@ class UpsrlmShgDetailView(APIView):
             data = {c: data.get(c) for c in cols}
         return Response(data)
 
+class CRPEPViewSet(viewsets.ModelViewSet, BaseProjectionMixin):
+    queryset = CRPEP.objects.all()
+    serializer_class = CRPEPSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'mobile_number']
+    ordering_fields = ['id', 'created_at']
+
+    def get_queryset(self):
+        """
+        Base queryset optimized: restrict columns and eager-load real relations only.
+        Note: district_id/block_id/panchayat_id are plain integer fields (NOT FKs),
+        so we must not use select_related on them.
+        """
+        qs = CRPEP.objects.select_related('master_user').only(
+            'id', 'name', 'mobile_number', 'category', 'subcategory', 'marks_obtained', 'TH_urid',
+            'district_id', 'block_id', 'panchayat_id', 'lokos_shg_code', 'master_user_id', 'nodal_clf',
+            'created_at', 'updated_at', 'deleted_at'
+        ).all().order_by('-id')
+
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'is_authenticated', False):
+            try:
+                # try to map request.user to your MasterUser table (non-managed user)
+                mu = MasterUser.objects.filter(username=user.username).first()
+                if mu:
+                    # restrict to CRP user role 'crp_ep' if applicable
+                    # using get_role_name() if available on your MasterUser model
+                    role_name = None
+                    try:
+                        role_name = mu.get_role_name()
+                    except Exception:
+                        role_name = getattr(mu, 'role_name', None) or getattr(mu, 'role', None)
+                    if role_name == 'crp_ep' or (getattr(mu, 'role', None) and getattr(getattr(mu, 'role'), 'id', None) and role_name == 'crp_ep'):
+                        qs = qs.filter(master_user_id=mu.id)
+            except Exception:
+                # Do not break - return base qs
+                pass
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        """
+        Support fields projection via BaseProjectionMixin.apply_fields_projection.
+        If projection returns a values() queryset or a list of dicts, paginate/return accordingly.
+        """
+        qs = self.get_queryset()
+        projected = None
+        try:
+            projected = self.apply_fields_projection(request, qs)
+        except Exception:
+            # if projection fails, fallback to full qs
+            projected = qs
+
+        # Detect values() QuerySet (has query.is_values == True) or plain list
+        is_values_qs = False
+        if hasattr(projected, 'query') and getattr(projected.query, 'is_values', False):
+            is_values_qs = True
+
+        if isinstance(projected, list) or is_values_qs:
+            page = self.paginate_queryset(projected)
+            if page is not None:
+                # DRF paginator expects a list for values queryset; convert to list if needed
+                return self.get_paginated_response(list(page))
+            return Response(list(projected))
+
+        # otherwise fallback to default ModelViewSet list (serializer based)
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get'])
+    @method_decorator(cache_page(CACHE_TTL))
+    def mylist(self, request):
+        """
+        User-specific (CRP) list. Uses get_queryset user filtering.
+        Respects fields projection and pagination.
+        """
+        qs = self.get_queryset()
+        try:
+            projected = self.apply_fields_projection(request, qs)
+        except Exception:
+            projected = qs
+
+        is_values_qs = hasattr(projected, 'query') and getattr(projected.query, 'is_values', False)
+        if is_values_qs:
+            page = self.paginate_queryset(projected)
+            return self.get_paginated_response(list(page) if page is not None else list(projected))
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = CRPEPSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CRPEPSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """
+        CSV export (stream-friendly for moderate datasets).
+        Exports only selected columns required by the frontend.
+        """
+        qs = self.get_queryset().only(
+            'id', 'name', 'district_id', 'block_id', 'panchayat_id', 'lokos_shg_code', 'mobile_number', 'category', 'marks_obtained'
+        )
+
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(['id', 'name', 'district_id', 'block_id', 'panchayat_id', 'shg_code', 'mobile_number', 'category', 'marks_obtained'])
+
+        # Used iterator() for memory efficiency on large querysets
+        for r in qs.iterator():
+            writer.writerow([
+                r.id,
+                r.name,
+                r.district_id,
+                r.block_id,
+                r.panchayat_id,
+                getattr(r, 'lokos_shg_code', ''),
+                r.mobile_number,
+                r.category,
+                r.marks_obtained
+            ])
+
+        # Return as HttpResponse (small-to-medium exports)
+        buffer.seek(0)
+        response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="crpep_export.csv"'
+        return response
+
+
+class CRPPanchayatMappingViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=True, methods=['post'])
+    def link(self, request, pk=None):
+        crp_id = pk
+        panchayat_ids = request.data.get('panchayat_ids', [])
+        if not isinstance(panchayat_ids, list):
+            return Response({'detail':'panchayat_ids must be list'}, status=status.HTTP_400_BAD_REQUEST)
+        from epSakhi.models import CRPEPToPanchayat
+        created = []
+        with transaction.atomic():
+            for pid in panchayat_ids:
+                obj, _ = CRPEPToPanchayat.objects.get_or_create(crp_id=crp_id, allocated_panchayat_id=pid)
+                created.append(obj.id)
+        return Response({'created_ids': created})
 
 # ---- BeneficiaryRecorded viewset ----
 from rest_framework import mixins

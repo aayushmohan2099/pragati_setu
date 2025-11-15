@@ -1,7 +1,6 @@
 Django>=4.2,<5
 djangorestframework
 djangorestframework-simplejwt
-mysqlclient
 Pillow
 django-cors-headers
 django-background-tasks
@@ -10,3 +9,4 @@ openpyxl
 django-filter
 drf-yasg
 pymysql
+requests
