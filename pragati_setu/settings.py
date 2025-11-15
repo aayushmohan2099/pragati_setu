@@ -11,6 +11,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'DJANGO_SECRET_KEY'
 DEBUG = 'True'
 ALLOWED_HOSTS = ['*'] 
+APISETU_CLIENT_ID = os.getenv('APISETU_CLIENT_ID', '')
+APISETU_API_KEY = os.getenv('APISETU_API_KEY', '')
+APISETU_SHG_LIST_URL_TEMPLATE = os.getenv('APISETU_SHG_LIST_URL_TEMPLATE', '')
+APISETU_SHG_DETAIL_URL_TEMPLATE = os.getenv('APISETU_SHG_DETAIL_URL_TEMPLATE', '')
+SHG_CACHE_TTL = int(os.getenv('SHG_CACHE_TTL', '300'))
 
 # =========================
 # APPS
