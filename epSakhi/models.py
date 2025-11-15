@@ -82,6 +82,17 @@ class CRPEP(SoftDeleteMixin):
     def __str__(self):
         return f"{self.id} - {self.name}"
 
+class CRPEPToPanchayat(SoftDeleteMixin):
+    id = models.BigAutoField(primary_key=True)
+    crp = models.ForeignKey(CRPEP, on_delete=models.CASCADE, db_column='crp_id', db_constraint=False)
+    allocated_panchayat_id = models.BigIntegerField()
+
+    class Meta:
+        db_table = 'epSakhi_crpep_panchayat'
+
+    def __str__(self):
+        return f"{self.crp_id} -> {self.allocated_panchayat_id}"        
+
 
 # -------------------------
 # New: BeneficiaryRecorded (epSakhi_recorBenefs)
