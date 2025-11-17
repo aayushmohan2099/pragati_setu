@@ -18,6 +18,7 @@ import json
 from django.conf import settings
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from django.contrib.auth import get_user_model  # NEW: to map JWT user_id -> auth user
 
 # SimpleJWT token class for validation
 from rest_framework_simplejwt.tokens import AccessToken, TokenError
@@ -30,6 +31,7 @@ API_KEY_HEADER = "HTTP_X_API_KEY"
 
 # Which roles are allowed to access epSakhi APIs (master_user.role id)
 EP_SAKHI_ALLOWED_ROLE_IDS = {1, 2, 3, 10, 6, 8, 9}
+
 
 class ApiIdApiKeyMiddleware(MiddlewareMixin):
     """
@@ -58,6 +60,11 @@ class ApiIdApiKeyMiddleware(MiddlewareMixin):
     def _validate_access_token_and_role(self, request):
         """
         Validate Authorization: Bearer <token>
+
+        SimpleJWT behaviour:
+        - Token contains `user_id` for the Django auth user (auth_user.pk).
+        - We then map that auth user -> MasterUser using username (same as LoginView).
+
         If token valid, ensure corresponding MasterUser exists, is active and role id is allowed.
         Return (True, None) if ok; else (False, reason)
         """
@@ -72,19 +79,26 @@ class ApiIdApiKeyMiddleware(MiddlewareMixin):
         try:
             # Validate token signature and expiry
             access = AccessToken(token_str)
-        except TokenError as e:
+        except TokenError:
             return False, 'Invalid or expired access token'
 
-        # Token validated — extract user id
-        # SimpleJWT standard claim: 'user_id'
-        user_id = access.payload.get('user_id') or access.payload.get('user_id')
+        # Token validated — extract Django auth user id
+        # SimpleJWT standard claim: 'user_id'; sometimes people customise to 'id' so we check both.
+        user_id = access.payload.get('user_id') or access.payload.get('id')
         if not user_id:
             return False, 'Access token missing user_id'
 
+        # 1) Load the Django auth user from the token's user_id
+        User = get_user_model()
         try:
-            # MasterUser.id is BigAutoField; token user id may be str or int
-            mu = MasterUser.objects.get(id=int(user_id))
-        except Exception:
+            auth_user = User.objects.get(pk=int(user_id))
+        except (User.DoesNotExist, ValueError, TypeError):
+            return False, 'User not found for access token'
+
+        # 2) Map auth user -> MasterUser using username (same logic as LoginView)
+        try:
+            mu = MasterUser.objects.get(username=auth_user.username)
+        except MasterUser.DoesNotExist:
             return False, 'Master user not found'
 
         # check active flag
