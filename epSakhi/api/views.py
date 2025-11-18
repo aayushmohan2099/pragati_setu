@@ -606,13 +606,14 @@ class ExistingEnterpriseViewSet(viewsets.ModelViewSet):
     """
     /api/v1/epsakhi/existing-enterprise/
 
-    Supports nested create/update of:
-      - loan_details        -> EnterpriseLoanDetail (many)
-      - support_detail      -> EnterpriseSupportDetail (single row)
-      - training_reqs       -> EnterpriseTrainingReq (many)
-      - media               -> EnterpriseMedia (single row)
-
-    See ExistingEnterpriseSerializer for payload structure.
+    NOTE (Option B):
+    - This viewset now only handles the main ExistingEnterprise table.
+    - Child tables (loan details, support detail, training reqs, media)
+      are handled via separate CRUD APIs:
+        * /enterprise-loan-details/
+        * /enterprise-support-details/
+        * /enterprise-training-reqs/
+        * /enterprise-media/
     """
     queryset = ExistingEnterprise.objects.all().order_by('-created_at')
     serializer_class = ExistingEnterpriseSerializer
@@ -626,6 +627,99 @@ class NewEnterpriseViewSet(viewsets.ModelViewSet):
     queryset = NewEnterprise.objects.all().order_by('-created_at')
     serializer_class = NewEnterpriseSerializer
     permission_classes = [IsAuthenticated]
+
+
+# -------------------------------------------------------------------
+# NEW: Separate CRUD APIs for child tables (Option B)
+# -------------------------------------------------------------------
+
+class EnterpriseLoanDetailViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/enterprise-loan-details/
+
+    Query params:
+      - enterprise_id=<TH_urid of ExistingEnterprise>  (optional filter)
+    """
+    queryset = EnterpriseLoanDetail.objects.all().order_by('-created_at')
+    serializer_class = EnterpriseLoanDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        return qs
+
+
+class EnterpriseSupportDetailViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/enterprise-support-details/
+
+    One enterprise can have MANY support_detail rows now.
+    Filter by ?enterprise_id= to get all for one enterprise.
+    """
+    queryset = EnterpriseSupportDetail.objects.all().order_by('-created_at')
+    serializer_class = EnterpriseSupportDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        return qs
+
+
+class EnterpriseTrainingReqViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/enterprise-training-reqs/
+
+    One enterprise can have MANY training_req rows.
+    Filter by ?enterprise_id=
+    """
+    queryset = EnterpriseTrainingReq.objects.all().order_by('-created_at')
+    serializer_class = EnterpriseTrainingReqSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        return qs
+
+
+class EnterpriseMediaViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/enterprise-media/
+
+    One enterprise can have MANY media rows. Each row can carry up to 1 file
+    per field (photo_entrepreneur, photo_enterprise, open_box_photo, etc).
+
+    IMPORTANT:
+    - This endpoint accepts multipart/form-data.
+    - RN frontend must send FormData with fields:
+        enterprise_id: <TH_urid>
+        photo_entrepreneur: (file)
+        photo_enterprise: (file)
+        open_box_photo: (file)
+        close_box_photo: (file)
+        others: (file)
+        certificates: (file)
+      Any missing fields can be omitted.
+    """
+    queryset = EnterpriseMedia.objects.all().order_by('-created_at')
+    serializer_class = EnterpriseMediaSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        return qs
 
 
 # ===================================================================

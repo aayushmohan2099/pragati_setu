@@ -70,24 +70,41 @@ class BeneficiaryRecordedSerializer(serializers.ModelSerializer):
 # ============= DETAIL SERIALIZERS =============
 
 class EnterpriseLoanDetailSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-loan-details/ 
+      - (Optionally) nested in ExistingEnterpriseSerializer for read operations.
+    """
     class Meta:
         model = EnterpriseLoanDetail
         fields = '__all__'
 
 
 class EnterpriseSupportDetailSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-support-details/ 
+    """
     class Meta:
         model = EnterpriseSupportDetail
         fields = '__all__'
 
 
 class EnterpriseTrainingReqSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-training-reqs/ 
+    """
     class Meta:
         model = EnterpriseTrainingReq
         fields = '__all__'
 
 
 class EnterpriseMediaSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-media/ 
+    """
     class Meta:
         model = EnterpriseMedia
         fields = '__all__'
@@ -97,16 +114,19 @@ class EnterpriseMediaSerializer(serializers.ModelSerializer):
 
 class ExistingEnterpriseSerializer(serializers.ModelSerializer):
     """
-    Nested write-only fields:
+    NOTE:
+    - Frontend will now generally create/update child rows using their own APIs
+      (/enterprise-loan-details/, /enterprise-support-details/, etc).
+    - The nested write logic below is kept for backward compatibility; if
+      `loan_details`, `support_detail`, `training_reqs`, or `media` are not
+      sent in the payload, they are simply ignored and no child rows are touched.
+
+    Nested write-only fields (optional):
 
     - loan_details: [ { institution_name, loan_amount, date_taken, repayment_status }, ... ]
     - support_detail: { department_name, scheme_name, ..., other_support }
     - training_reqs: [ { skill_name, training_type, any_specific_scheme, any_specific_department }, ... ]
     - media: { photo_entrepreneur, photo_enterprise, open_box_photo, close_box_photo, others, certificates }
-
-    These are stored in:
-      EnterpriseLoanDetail, EnterpriseSupportDetail, EnterpriseTrainingReq, EnterpriseMedia
-    with enterprise_id = ExistingEnterprise.TH_urid
     """
 
     loan_details = EnterpriseLoanDetailSerializer(
@@ -142,7 +162,6 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
         # ----- Loan details -----
         if loan_data:
             for ld in loan_data:
-                # Ensure enterprise_id comes from parent
                 EnterpriseLoanDetail.objects.create(
                     enterprise_id=enterprise_id,
                     **ld
@@ -167,7 +186,7 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
                 )
 
         # ----- Media (single row) -----
-        # NOTE: for real file uploads, API must accept multipart/form-data.
+        # NOTE: for real file uploads, prefer /enterprise-media/
         if media_data:
             EnterpriseMedia.objects.create(
                 enterprise_id=enterprise_id,
@@ -189,7 +208,6 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
 
         # ----- Loan details -----
         if loan_data is not None:
-            # Replace all loan rows with new set
             EnterpriseLoanDetail.objects.filter(enterprise_id=enterprise_id).delete()
             if loan_data:
                 for ld in loan_data:

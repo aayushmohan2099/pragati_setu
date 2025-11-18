@@ -17,7 +17,12 @@ from .views import (
     EpsakhiListByShgView,
     EpsakhiDetailByMemberView,
     CRPDetailbyUserID,
-    CRPPanchayatsUnderCrpByID
+    CRPPanchayatsUnderCrpByID,
+    # NEW: child enterprise viewsets
+    EnterpriseLoanDetailViewSet,
+    EnterpriseSupportDetailViewSet,
+    EnterpriseTrainingReqViewSet,
+    EnterpriseMediaViewSet,
 )
 
 router = DefaultRouter()
@@ -25,6 +30,12 @@ router.register('crp', CRPEPViewSet, basename='crp')
 router.register('recorded-beneficiaries', BeneficiaryRecordedViewSet, basename='recorded-beneficiaries')
 router.register('existing-enterprise', ExistingEnterpriseViewSet, basename='existing-enterprise')
 router.register('new-enterprise', NewEnterpriseViewSet, basename='new-enterprise')
+
+# NEW: child table routers
+router.register('enterprise-loan-details', EnterpriseLoanDetailViewSet, basename='enterprise-loan-details')
+router.register('enterprise-support-details', EnterpriseSupportDetailViewSet, basename='enterprise-support-details')
+router.register('enterprise-training-reqs', EnterpriseTrainingReqViewSet, basename='enterprise-training-reqs')
+router.register('enterprise-media', EnterpriseMediaViewSet, basename='enterprise-media')
 
 mapping_urls = [
     path(
