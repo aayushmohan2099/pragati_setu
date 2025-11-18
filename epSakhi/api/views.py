@@ -603,12 +603,26 @@ class BeneficiaryRecordedViewSet(viewsets.ModelViewSet, BaseProjectionMixin):
 # -------------------------------------------------------------------
 
 class ExistingEnterpriseViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/existing-enterprise/
+
+    Supports nested create/update of:
+      - loan_details        -> EnterpriseLoanDetail (many)
+      - support_detail      -> EnterpriseSupportDetail (single row)
+      - training_reqs       -> EnterpriseTrainingReq (many)
+      - media               -> EnterpriseMedia (single row)
+
+    See ExistingEnterpriseSerializer for payload structure.
+    """
     queryset = ExistingEnterprise.objects.all().order_by('-created_at')
     serializer_class = ExistingEnterpriseSerializer
     permission_classes = [IsAuthenticated]
 
 
 class NewEnterpriseViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/new-enterprise/
+    """
     queryset = NewEnterprise.objects.all().order_by('-created_at')
     serializer_class = NewEnterpriseSerializer
     permission_classes = [IsAuthenticated]
