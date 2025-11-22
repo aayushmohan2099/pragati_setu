@@ -103,11 +103,22 @@ DATABASE_ROUTERS = ['core.dbrouters.MasterDBRouter']
 # =========================
 # CACHES
 # =========================
-# Default is DB cache - you can change to redis by swapping backend and installing django-redis
+# Use Redis (via django-redis) for default cache.
+# This powers:
+# - SHG / APISetu proxy caching
+# - cache_page decorators
+# - any other cache usage via django.core.cache.cache
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-        'LOCATION': 'django_cache_table',
+        'BACKEND': 'django_redis.cache.RedisCache',
+        # Password 'techno@2025' -> 'techno%402025' in URL
+        'LOCATION': 'redis://:techno%402025@127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 2,
+            'SOCKET_TIMEOUT': 2,
+        },
+        'KEY_PREFIX': 'pragati_setu',
     }
 }
 
