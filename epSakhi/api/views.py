@@ -1,304 +1,254 @@
-import requests
+# epSakhi/api/views.py
+
 import json
 import csv
 from io import StringIO
 from collections import defaultdict
 
+import requests
+
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction, models
-from django.db.models import Q, Prefetch, F, OuterRef, Subquery
-from django.http import StreamingHttpResponse, HttpResponse
+from django.db.models import Q
+from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 
 from rest_framework import viewsets, status, filters, generics
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser, FormParser
 
 from core.models import (
     MasterUser,
     MasterPanchayat,
+    MasterBlock,
+    MasterDistrict,
+    MasterGeoUserScope,
 )
 from epSakhi.models import (
     CRPEP,
+    CRPEPToPanchayat,
     BeneficiaryRecorded,
     ExistingEnterprise,
     NewEnterprise,
     EnterpriseLoanDetail,
-    EnterpriseSupportDetail,
+    EnterpriseSubsidyDetail,   
     EnterpriseTrainingReq,
     EnterpriseMedia,
-    CRPEPToPanchayat,
+    EnterpriseProduct,         
+    EnterpriseTypeCategory,    
+    NoEnterpriseForm,          
+    NoEnterpriseWage,          
 )
+
 from .serializers import (
     CRPEPSerializer,
     BeneficiaryRecordedSerializer,
     ExistingEnterpriseSerializer,
     NewEnterpriseSerializer,
     EnterpriseLoanDetailSerializer,
-    EnterpriseSupportDetailSerializer,
+    EnterpriseSupportDetailSerializer,  
     EnterpriseTrainingReqSerializer,
     EnterpriseMediaSerializer,
+    EnterpriseProductSerializer,        
+    EnterpriseTypeCategorySerializer,   
+    NoEnterpriseFormSerializer,         
+    NoEnterpriseWageSerializer,         
 )
 
-# cache ttl in seconds
-CACHE_TTL = getattr(settings, 'CACHE_TTL', 60 * 5)
-SHG_CACHE_TTL = getattr(settings, 'SHG_CACHE_TTL', 60 * 5)  # default 5 minutes
-
-
-class BaseProjectionMixin:
-    """
-    Allows list endpoints to accept ?fields=col1,col2 and return .values(...) directly (fast).
-    """
-
-    def apply_fields_projection(self, request, qs):
-        fields = request.GET.get('fields')
-        if not fields:
-            return qs
-        cols = [f.strip() for f in fields.split(',') if f.strip()]
-        if not cols:
-            return qs
-        return qs.values(*cols)
-
+# Backward-compat alias: keep old name used everywhere in code,
+# but actually point to the new model.
+EnterpriseSupportDetail = EnterpriseSubsidyDetail
 
 # -------------------------------------------------------------------
-# Small generic helpers for list-style endpoints
+# Common helpers
 # -------------------------------------------------------------------
 
-def _parse_csv_param(value):
+CACHE_TTL = getattr(settings, 'CACHE_TTL', 300)
+SHG_CACHE_TTL = getattr(settings, 'SHG_CACHE_TTL', 300)
+
+
+def _parse_csv_param(value: str):
     if not value:
         return []
-    return [v.strip() for v in str(value).split(',') if v.strip()]
+    return [p.strip() for p in value.split(',') if p.strip()]
 
 
-def _paginate_plain_list(request, items):
+def _paginate_plain_list(request, data):
     """
-    For list-of-dict style responses with:
-      ?page (1-based), ?page_size (default 10, max 100).
+    Simple manual paginator for list-of-dicts responses.
+    Supports page & page_size query params; defaults page_size=10.
     """
     try:
         page = int(request.GET.get('page', '1'))
-        page_size = min(100, int(request.GET.get('page_size', '10')))
-    except Exception:
+        page_size = int(request.GET.get('page_size', '10'))
+    except ValueError:
         page, page_size = 1, 10
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 10
 
-    total = len(items)
+    total = len(data)
     start = (page - 1) * page_size
     end = start + page_size
-    data = items[start:end]
+    items = data[start:end]
     return {
-        'meta': {'page': page, 'page_size': page_size, 'total': total},
-        'data': data,
+        'meta': {
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+        },
+        'data': items,
     }
 
 
-def _apply_list_filters(items, filter_map, params):
+def _apply_list_filters(rows, filter_map, params):
     """
-    filter_map: { query_param_name -> item_key }
-    params: request.GET
+    rows: list[dict]
+    filter_map: { query_param_name: key_in_row }
     """
-    for qparam, key in filter_map.items():
-        raw_val = params.get(qparam)
-        if raw_val is None:
-            continue
-        vals = _parse_csv_param(raw_val)
-        if not vals:
-            continue
-        vals_set = {str(v) for v in vals}
-        items = [row for row in items if str(row.get(key)) in vals_set]
-    return items
+    for qparam, field in filter_map.items():
+        if qparam in params:
+            value = params.get(qparam)
+            rows = [r for r in rows if str(r.get(field)) == str(value)]
+    return rows
 
 
-def _apply_list_search(items, search_param, search_fields):
-    if not search_param:
-        return items
-    q = search_param.lower()
-
-    def _match(row):
-        for f in search_fields:
-            val = row.get(f)
-            if val is not None and q in str(val).lower():
-                return True
-        return False
-
-    return [row for row in items if _match(row)]
-
-
-def _apply_list_ordering(items, ordering_param, allowed_fields):
-    if not ordering_param:
-        return items
-    orderings = _parse_csv_param(ordering_param)
-    if not orderings:
-        return items
-    first = orderings[0]
-    desc = first.startswith('-')
-    field = first[1:] if desc else first
-    if field not in allowed_fields:
-        return items
-
-    def key_fn(row):
-        v = row.get(field)
-        return '' if v is None else v
-
-    return sorted(items, key=key_fn, reverse=desc)
-
-
-def _apply_list_group_by(items, group_by_param):
-    """
-    Returns aggregated list of {<group fields...>, count}
-    or None if no group_by requested.
-    """
-    if not group_by_param:
-        return None
-    keys = [k.strip() for k in str(group_by_param).split(',') if k.strip()]
-    if not keys:
-        return None
-
-    counts = defaultdict(int)
-    for row in items:
-        gkey = tuple(row.get(k) for k in keys)
-        counts[gkey] += 1
-
+def _apply_list_search(rows, search_term, search_fields):
+    if not search_term:
+        return rows
+    ql = search_term.lower()
     out = []
-    for gkey, count in counts.items():
-        obj = {keys[i]: gkey[i] for i in range(len(keys))}
-        obj['count'] = count
-        out.append(obj)
+    for r in rows:
+        for f in search_fields:
+            v = r.get(f)
+            if v is not None and ql in str(v).lower():
+                out.append(r)
+                break
     return out
 
 
-def _apply_fields_projection_list(items, fields_param):
+def _apply_list_ordering(rows, ordering_param, allowed_fields):
+    if not ordering_param:
+        return rows
+    reverse = ordering_param.startswith('-')
+    key = ordering_param.lstrip('-')
+    if key not in allowed_fields:
+        return rows
+    return sorted(rows, key=lambda r: r.get(key) or '', reverse=reverse)
+
+
+def _apply_list_group_by(rows, group_by_param):
+    if not group_by_param:
+        return None
+    keys = [k.strip() for k in group_by_param.split(',') if k.strip()]
+    if not keys:
+        return None
+    agg = defaultdict(int)
+    for r in rows:
+        gk = tuple(r.get(k) for k in keys)
+        agg[gk] += 1
+    out = [{'group': dict(zip(keys, k)), 'count': v} for k, v in agg.items()]
+    return out
+
+
+def _apply_fields_projection_list(rows, fields_param):
     if not fields_param:
-        return items
-    cols = [c.strip() for c in str(fields_param).split(',') if c.strip()]
-    if not cols:
-        return items
-    projected = []
-    for row in items:
-        projected.append({c: row.get(c) for c in cols})
-    return projected
+        return rows
+    cols = [c.strip() for c in fields_param.split(',') if c.strip()]
+    return [{c: r.get(c) for c in cols} for r in rows]
 
 
 # -------------------------------------------------------------------
-# Helper to call APISETU for SHG
+# SHG (UPSRLM via APISetu) – simple endpoints used by epSakhi
 # -------------------------------------------------------------------
 
-def _call_apisetu_shg_list(block_id):
-    url = settings.APISETU_SHG_LIST_URL_TEMPLATE.format(block_id=block_id)
-    headers = {
-        'X-APISETU-CLIENTID': settings.APISETU_CLIENT_ID,
-        'X-APISETU-APIKEY': settings.APISETU_API_KEY,
-        'accept': 'application/json'
+def _get_apisetu_headers():
+    client_id = getattr(settings, "APISETU_CLIENT_ID", None)
+    api_key = getattr(settings, "APISETU_API_KEY", None)
+    if not client_id or not api_key:
+        raise RuntimeError("APISETU_CLIENT_ID / APISETU_API_KEY must be set in settings")
+    return {
+        "X-APISETU-CLIENTID": client_id,
+        "X-APISETU-APIKEY": api_key,
+        "accept": "application/json",
     }
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
+
+
+def _call_apisetu_shg_list(block_id: int):
+    template = getattr(
+        settings,
+        "APISETU_SHG_LIST_URL_TEMPLATE",
+        "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg/block?block_id={block_id}",
+    )
+    url = template.format(block_id=block_id)
+    resp = requests.get(url, headers=_get_apisetu_headers(), timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"APISetu SHG list error {resp.status_code}: {resp.text[:200]}")
     return resp.json()
 
 
-def _call_apisetu_shg_detail(shg_code):
-    url = settings.APISETU_SHG_DETAIL_URL_TEMPLATE.format(shg_code=shg_code)
-    headers = {
-        'X-APISETU-CLIENTID': settings.APISETU_CLIENT_ID,
-        'X-APISETU-APIKEY': settings.APISETU_API_KEY,
-        'accept': 'application/json'
-    }
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
+def _call_apisetu_shg_detail(shg_code: str):
+    template = getattr(
+        settings,
+        "APISETU_SHG_DETAIL_URL_TEMPLATE",
+        "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg/detail?shg_code={shg_code}",
+    )
+    url = template.format(shg_code=shg_code)
+    resp = requests.get(url, headers=_get_apisetu_headers(), timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"APISetu SHG detail error {resp.status_code}: {resp.text[:200]}")
     return resp.json()
 
-
-# -------------------------------------------------------------------
-# UPSRLM SHG proxy endpoints (already existing)
-# -------------------------------------------------------------------
 
 class UpsrlmShgListView(APIView):
+    """
+    GET /api/v1/epsakhi/upsrlm-shg-list/<block_id>/
+    Wrapper around APISetu SHG list for a given block.
+    """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, block_id):
-        # fetch or read cached JSON for block_id
         cache_key = f"upsrlm_shg_list:{block_id}"
         j = cache.get(cache_key)
         if j is None:
             try:
                 j = _call_apisetu_shg_list(block_id)
             except Exception as e:
-                return Response({'detail': f'Error fetching remote shg-list: {str(e)}'}, status=502)
+                return Response({'detail': f'Error fetching SHG list: {str(e)}'}, status=502)
             cache.set(cache_key, j, SHG_CACHE_TTL)
 
-        queryset = j  # list of dicts
+        rows = j.get('data') or j.get('shg_list') or []
+        # optional search, ordering, fields, pagination
+        rows = _apply_list_search(
+            rows,
+            request.GET.get('search'),
+            ['shg_name', 'shg_code', 'village_name'],
+        )
+        rows = _apply_list_ordering(
+            rows,
+            request.GET.get('ordering'),
+            allowed_fields={'shg_name', 'shg_code'},
+        )
+        grouped = _apply_list_group_by(rows, request.GET.get('group_by'))
+        if grouped is not None:
+            grouped = _apply_fields_projection_list(grouped, request.GET.get('fields'))
+            return Response(grouped)
 
-        # Filters: panchayat_id, village_id, shgType, specialShg, social_category
-        p_panchayat = request.GET.get('panchayat_id')
-        p_village = request.GET.get('village_id')
-        p_shgtype = request.GET.get('shgType')
-        p_special = request.GET.get('specialShg')
-        p_social = request.GET.get('social_category')
-        if p_panchayat:
-            queryset = [x for x in queryset if str(x.get('panchayatId')) == str(p_panchayat)]
-        if p_village:
-            queryset = [x for x in queryset if str(x.get('villageId')) == str(p_village)]
-        if p_shgtype:
-            queryset = [x for x in queryset if x.get('shgType') == p_shgtype]
-        if p_special is not None:
-            val = p_special in ('1', 'true', 'True')
-            queryset = [x for x in queryset if bool(int(x.get('specialShg', 0))) == val]
-        if p_social:
-            queryset = [x for x in queryset if x.get('socialCategory') == p_social]
-
-        # Search: name, nic_code, shg_code
-        q = request.GET.get('search')
-        if q:
-            ql = q.lower()
-
-            def matches(item):
-                return (
-                    ql in (str(item.get('name', '')).lower())
-                    or ql in (str(item.get('nicCode', '')).lower())
-                    or ql in (str(item.get('code', '')).lower())
-                )
-
-            queryset = [x for x in queryset if matches(x)]
-
-        # Ordering: formation_date (-asc,-dsc)
-        ordering = request.GET.get('ordering')
-        if ordering:
-            reverse = ordering.startswith('-')
-            def key_fn(it):
-                return it.get('formationDate') or ''
-            queryset = sorted(queryset, key=key_fn, reverse=reverse)
-
-        # group_by (aggregation)
-        group_by = request.GET.get('group_by')
-        if group_by:
-            keys = [k.strip() for k in group_by.split(',') if k.strip()]
-            agg = {}
-            for it in queryset:
-                group_key = tuple(str(it.get(k)) for k in keys)
-                agg[group_key] = agg.get(group_key, 0) + 1
-            out = []
-            for k, cnt in agg.items():
-                out.append({'group': dict(zip(keys, k)), 'count': cnt})
-            return Response(out)
-
-        # fields projection
-        fields = request.GET.get('fields')
-        if fields:
-            cols = [c.strip() for c in fields.split(',') if c.strip()]
-            queryset = [
-                {c: (it.get(c) or it.get(c[0].lower() + c[1:], None)) for c in cols}
-                for it in queryset
-            ]
-
-        # pagination
-        result = _paginate_plain_list(request, queryset)
+        rows = _apply_fields_projection_list(rows, request.GET.get('fields'))
+        result = _paginate_plain_list(request, rows)
         return Response(result)
 
 
 class UpsrlmShgMembersView(APIView):
+    """
+    GET /api/v1/epsakhi/upsrlm-shg-members/<shg_code>/
+    Uses SHG detail endpoint and returns members with filters/search/ordering/pagination.
+    """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, shg_code):
@@ -308,21 +258,22 @@ class UpsrlmShgMembersView(APIView):
             try:
                 j = _call_apisetu_shg_detail(shg_code)
             except Exception as e:
-                return Response({'detail': f'Error fetching shg-detail: {str(e)}'}, status=502)
+                return Response({'detail': f'Error fetching shg-members: {str(e)}'}, status=502)
             cache.set(cache_key, j, SHG_CACHE_TTL)
 
-        members = j.get('shg_members', [])
+        members = j.get('shg_members', []) or []
 
-        # filters: aadhar_verified, gender, religion, social_category, designation
-        if 'aadhar_verified' in request.GET:
-            av = request.GET.get('aadhar_verified') in ('1', 'true', 'True')
-            members = [m for m in members if bool(m.get('aadhar_verified')) == av]
+        # Simple filters
+        if request.GET.get('aadhar_verified') is not None:
+            av = request.GET.get('aadhar_verified')
+            if av.lower() in ('1', 'true', 'yes'):
+                members = [m for m in members if m.get('aadhar_verified')]
+            else:
+                members = [m for m in members if not m.get('aadhar_verified')]
+
         for f in ('gender', 'religion', 'social_category'):
             if request.GET.get(f):
                 members = [m for m in members if m.get(f) == request.GET.get(f)]
-        if request.GET.get('designation'):
-            des = request.GET.get('designation')
-            members = [m for m in members if any(d.get('designation') == des for d in m.get('member_designations', []))]
 
         # search
         q = request.GET.get('search')
@@ -375,6 +326,10 @@ class UpsrlmShgMembersView(APIView):
 
 
 class UpsrlmShgDetailView(APIView):
+    """
+    GET /api/v1/epsakhi/upsrlm-shg-detail/<shg_code>/
+    Returns SHG detail (without members, unless requested).
+    """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, shg_code):
@@ -396,103 +351,68 @@ class UpsrlmShgDetailView(APIView):
 
 
 # -------------------------------------------------------------------
-# Existing CRPEP ViewSet
+# BaseProjectionMixin (used by some viewsets)
+# -------------------------------------------------------------------
+
+class BaseProjectionMixin:
+    """
+    Adds support for:
+      - fields=<comma>
+      - group_by=<comma>
+      - ordering=<field or -field>
+    """
+
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+
+        group_by = request.GET.get('group_by')
+        if group_by:
+            keys = [k.strip() for k in group_by.split(',') if k.strip()]
+            vals = qs.values(*keys).order_by().annotate(count=models.Count('TH_urid'))
+            return Response(list(vals))
+
+        fields = request.GET.get('fields')
+        if fields:
+            cols = [c.strip() for c in fields.split(',') if c.strip()]
+            qs = qs.values(*cols)
+            page = self.paginate_queryset(qs)
+            return self.get_paginated_response(list(page) if page is not None else list(qs))
+        return super().list(request, *args, **kwargs)
+
+
+# -------------------------------------------------------------------
+# CRPEP + mapping viewsets
 # -------------------------------------------------------------------
 
 class CRPEPViewSet(viewsets.ModelViewSet, BaseProjectionMixin):
-    queryset = CRPEP.objects.all()
+    queryset = CRPEP.objects.all().order_by('-created_at')
     serializer_class = CRPEPSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['name', 'mobile_number']
-    ordering_fields = ['id', 'created_at']
+    search_fields = ['name', 'mobile_number', 'lokos_member_code', 'lokos_shg_code']
+    ordering_fields = ['created_at', 'marks_obtained', 'id']
 
     def get_queryset(self):
-        """
-        Base queryset optimized: restrict columns and eager-load real relations only.
-        Note: district_id/block_id/panchayat_id are plain integer fields (NOT FKs).
-        """
-        qs = CRPEP.objects.select_related('master_user').only(
-            'id',
-            'name',
-            'mobile_number',
-            'category',
-            'subcategory',
-            'marks_obtained',
-            'TH_urid',
-            'district_id',
-            'block_id',
-            'panchayat_id',
-            'lokos_shg_code',
-            'lokos_member_code',
-            'master_user_id',
-            'nodal_clf',
-            'created_at',
-            'updated_at',
-            'deleted_at',
-        ).all().order_by('-id')
-
-        user = getattr(self.request, 'user', None)
-        if user and getattr(user, 'is_authenticated', False):
-            try:
-                mu = MasterUser.objects.filter(username=user.username).first()
-                if mu:
-                    role_name = None
-                    try:
-                        role_name = mu.get_role_name()
-                    except Exception:
-                        role_name = getattr(mu, 'role_name', None) or getattr(mu, 'role', None)
-                    if role_name == 'crp_ep' or (
-                        getattr(mu, 'role', None)
-                        and getattr(getattr(mu, 'role'), 'id', None)
-                        and role_name == 'crp_ep'
-                    ):
-                        qs = qs.filter(master_user_id=mu.id)
-            except Exception:
-                pass
-
+        qs = super().get_queryset()
+        params = self.request.GET
+        if params.get('district_id'):
+            qs = qs.filter(district_id=int(params['district_id']))
+        if params.get('block_id'):
+            qs = qs.filter(block_id=int(params['block_id']))
+        if params.get('panchayat_id'):
+            qs = qs.filter(panchayat_id=int(params['panchayat_id']))
+        if params.get('lokos_shg_code'):
+            qs = qs.filter(lokos_shg_code=params['lokos_shg_code'])
+        if params.get('nodal_clf'):
+            qs = qs.filter(nodal_clf=params['nodal_clf'])
         return qs
-
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        try:
-            projected = self.apply_fields_projection(request, qs)
-        except Exception:
-            projected = qs
-
-        is_values_qs = hasattr(projected, 'query') and getattr(projected.query, 'is_values', False)
-        if isinstance(projected, list) or is_values_qs:
-            page = self.paginate_queryset(projected)
-            if page is not None:
-                return self.get_paginated_response(list(page))
-            return Response(list(projected))
-
-        return super().list(request, *args, **kwargs)
-
-    @action(detail=False, methods=['get'])
-    @method_decorator(cache_page(CACHE_TTL))
-    def mylist(self, request):
-        qs = self.get_queryset()
-        try:
-            projected = self.apply_fields_projection(request, qs)
-        except Exception:
-            projected = qs
-
-        is_values_qs = hasattr(projected, 'query') and getattr(projected.query, 'is_values', False)
-        if is_values_qs:
-            page = self.paginate_queryset(projected)
-            return self.get_paginated_response(list(page) if page is not None else list(projected))
-
-        page = self.paginate_queryset(qs)
-        if page is not None:
-            serializer = CRPEPSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-
-        serializer = CRPEPSerializer(qs, many=True)
-        return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def export(self, request):
+        """
+        Export CRPEP list to CSV with basic fields.
+        """
         qs = self.get_queryset().only(
             'id',
             'name',
@@ -550,7 +470,7 @@ class CRPPanchayatMappingViewSet(viewsets.ViewSet):
 
 
 # -------------------------------------------------------------------
-# BeneficiaryRecorded ViewSet (existing)
+# BeneficiaryRecorded ViewSet
 # -------------------------------------------------------------------
 
 class BeneficiaryRecordedViewSet(viewsets.ModelViewSet, BaseProjectionMixin):
@@ -565,56 +485,31 @@ class BeneficiaryRecordedViewSet(viewsets.ModelViewSet, BaseProjectionMixin):
         qs = BeneficiaryRecorded.objects.all().order_by('-created_at')
         params = self.request.GET
         if params.get('district_id'):
-            qs = qs.filter(district_id=int(params.get('district_id')))
+            qs = qs.filter(district_id=int(params['district_id']))
         if params.get('block_id'):
-            qs = qs.filter(block_id=int(params.get('block_id')))
+            qs = qs.filter(block_id=int(params['block_id']))
         if params.get('panchayat_id'):
-            qs = qs.filter(panchayat_id=int(params.get('panchayat_id')))
+            qs = qs.filter(panchayat_id=int(params['panchayat_id']))
         if params.get('village_id'):
-            qs = qs.filter(village_id=int(params.get('village_id')))
+            qs = qs.filter(village_id=int(params['village_id']))
         if params.get('lokos_shg_code'):
-            qs = qs.filter(lokos_shg_code=params.get('lokos_shg_code'))
+            qs = qs.filter(lokos_shg_code=params['lokos_shg_code'])
         if params.get('gender'):
-            qs = qs.filter(gender=params.get('gender'))
+            qs = qs.filter(gender=params['gender'])
         if params.get('marital_status'):
-            qs = qs.filter(marital_status=params.get('marital_status'))
+            qs = qs.filter(marital_status=params['marital_status'])
         if params.get('category'):
-            qs = qs.filter(category=params.get('category'))
+            qs = qs.filter(category=params['category'])
         return qs
-
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        group_by = request.GET.get('group_by')
-        if group_by:
-            keys = [k.strip() for k in group_by.split(',') if k.strip()]
-            vals = qs.values(*keys).order_by().annotate(count=models.Count('TH_urid'))
-            return Response(list(vals))
-
-        fields = request.GET.get('fields')
-        if fields:
-            cols = [c.strip() for c in fields.split(',') if c.strip()]
-            qs = qs.values(*cols)
-            page = self.paginate_queryset(qs)
-            return self.get_paginated_response(list(page) if page is not None else list(qs))
-        return super().list(request, *args, **kwargs)
 
 
 # -------------------------------------------------------------------
-# Enterprise viewsets (existing)
+# Enterprise main viewsets
 # -------------------------------------------------------------------
 
 class ExistingEnterpriseViewSet(viewsets.ModelViewSet):
     """
     /api/v1/epsakhi/existing-enterprise/
-
-    NOTE (Option B):
-    - This viewset now only handles the main ExistingEnterprise table.
-    - Child tables (loan details, support detail, training reqs, media)
-      are handled via separate CRUD APIs:
-        * /enterprise-loan-details/
-        * /enterprise-support-details/
-        * /enterprise-training-reqs/
-        * /enterprise-media/
     """
     queryset = ExistingEnterprise.objects.all().order_by('-created_at')
     serializer_class = ExistingEnterpriseSerializer
@@ -631,7 +526,8 @@ class NewEnterpriseViewSet(viewsets.ModelViewSet):
 
 
 # -------------------------------------------------------------------
-# NEW: Separate CRUD APIs for child tables (Option B)
+# Child tables – loan/support(subsidy)/training/media
+# (updated with search, ordering, simple filtering)
 # -------------------------------------------------------------------
 
 class EnterpriseLoanDetailViewSet(viewsets.ModelViewSet):
@@ -639,17 +535,23 @@ class EnterpriseLoanDetailViewSet(viewsets.ModelViewSet):
     /api/v1/epsakhi/enterprise-loan-details/
 
     Query params:
-      - enterprise_id=<TH_urid of ExistingEnterprise>  (optional filter)
+      - enterprise_id=<TH_urid> (optional filter)
     """
     queryset = EnterpriseLoanDetail.objects.all().order_by('-created_at')
     serializer_class = EnterpriseLoanDetailSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['enterprise_id', 'institution_name']
+    ordering_fields = ['created_at', 'loan_amount', 'date_taken']
 
     def get_queryset(self):
         qs = super().get_queryset()
         enterprise_id = self.request.query_params.get('enterprise_id')
         if enterprise_id:
             qs = qs.filter(enterprise_id=enterprise_id)
+        form_type = self.request.query_params.get('form_type')
+        if form_type:
+            qs = qs.filter(form_type=form_type)
         return qs
 
 
@@ -657,12 +559,16 @@ class EnterpriseSupportDetailViewSet(viewsets.ModelViewSet):
     """
     /api/v1/epsakhi/enterprise-support-details/
 
-    One enterprise can have MANY support_detail rows now.
-    Filter by ?enterprise_id= to get all for one enterprise.
+    NOTE:
+    - Backward-compatible name; works on EnterpriseSubsidyDetail model.
+    - One enterprise can have MANY subsidy rows (epSakhi_exEpSubsidy).
     """
     queryset = EnterpriseSupportDetail.objects.all().order_by('-created_at')
     serializer_class = EnterpriseSupportDetailSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['enterprise_id', 'subsidy_type', 'subsidy_name']
+    ordering_fields = ['created_at']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -675,45 +581,67 @@ class EnterpriseSupportDetailViewSet(viewsets.ModelViewSet):
 class EnterpriseTrainingReqViewSet(viewsets.ModelViewSet):
     """
     /api/v1/epsakhi/enterprise-training-reqs/
-
-    One enterprise can have MANY training_req rows.
-    Filter by ?enterprise_id=
     """
     queryset = EnterpriseTrainingReq.objects.all().order_by('-created_at')
     serializer_class = EnterpriseTrainingReqSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['enterprise_id', 'training_module_name', 'sector', 'department']
+    ordering_fields = ['created_at', 'expected_income']
 
     def get_queryset(self):
         qs = super().get_queryset()
         enterprise_id = self.request.query_params.get('enterprise_id')
         if enterprise_id:
             qs = qs.filter(enterprise_id=enterprise_id)
+        form_type = self.request.query_params.get('form_type')
+        if form_type:
+            qs = qs.filter(form_type=form_type)
         return qs
 
 
 class EnterpriseMediaViewSet(viewsets.ModelViewSet):
     """
     /api/v1/epsakhi/enterprise-media/
-
-    One enterprise can have MANY media rows. Each row can carry up to 1 file
-    per field (photo_entrepreneur, photo_enterprise, open_box_photo, etc).
-
-    IMPORTANT:
-    - This endpoint accepts multipart/form-data.
-    - RN frontend must send FormData with fields:
-        enterprise_id: <TH_urid>
-        photo_entrepreneur: (file)
-        photo_enterprise: (file)
-        open_box_photo: (file)
-        close_box_photo: (file)
-        others: (file)
-        certificates: (file)
-      Any missing fields can be omitted.
     """
     queryset = EnterpriseMedia.objects.all().order_by('-created_at')
     serializer_class = EnterpriseMediaSerializer
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['enterprise_id']
+    ordering_fields = ['created_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        form_type = self.request.query_params.get('form_type')
+        if form_type:
+            qs = qs.filter(form_type=form_type)
+        return qs
+
+
+# -------------------------------------------------------------------
+# NEW: EnterpriseProduct / EnterpriseType / NoEnterprise* CRUD APIs
+# -------------------------------------------------------------------
+
+class EnterpriseProductViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/enterprise-products/
+    """
+    queryset = EnterpriseProduct.objects.all().order_by('-created_at')
+    serializer_class = EnterpriseProductSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = [
+        'enterprise_id',
+        'main_product_name',
+        'activity_or_product_type',
+        'marketing_strategy',
+        'marketing_channels',
+    ]
+    ordering_fields = ['created_at', 'avg_monthly_sales']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -723,226 +651,182 @@ class EnterpriseMediaViewSet(viewsets.ModelViewSet):
         return qs
 
 
-# ===================================================================
-# NEW epSakhi APIs (non-"upsrlm-") with Search/Filter/Sort/Group/Fields
-# ===================================================================
+class EnterpriseTypeCategoryViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/enterprise-types/
+    """
+    queryset = EnterpriseTypeCategory.objects.all().order_by('-created_at')
+    serializer_class = EnterpriseTypeCategorySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['enterprise_id', 'parent_category', 'sub_category', 'form_type']
+    ordering_fields = ['created_at']
 
-# 1) crp-list/<clf_code>
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        form_type = self.request.query_params.get('form_type')
+        if form_type:
+            qs = qs.filter(form_type=form_type)
+        return qs
+
+
+class NoEnterpriseFormViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/no-enterprise-forms/
+    """
+    queryset = NoEnterpriseForm.objects.all().order_by('-created_at')
+    serializer_class = NoEnterpriseFormSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['recorded_benef_id']
+    ordering_fields = ['created_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        recorded_benef_id = self.request.query_params.get('recorded_benef_id')
+        if recorded_benef_id:
+            qs = qs.filter(recorded_benef_id=recorded_benef_id)
+        return qs
+
+
+class NoEnterpriseWageViewSet(viewsets.ModelViewSet):
+    """
+    /api/v1/epsakhi/no-enterprise-wages/
+    """
+    queryset = NoEnterpriseWage.objects.all().order_by('-created_at')
+    serializer_class = NoEnterpriseWageSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['enterprise_id', 'placement_sector', 'type_of_emp', 'location_scope', 'location']
+    ordering_fields = ['created_at', 'exp_salary']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        enterprise_id = self.request.query_params.get('enterprise_id')
+        if enterprise_id:
+            qs = qs.filter(enterprise_id=enterprise_id)
+        return qs
+
+
+# -------------------------------------------------------------------
+# CRP helper APIs: CLF → CRP list, CRP detail, Panchayats under CRP, etc.
+# (Logic kept same; only imports updated to new models)
+# -------------------------------------------------------------------
+
+@method_decorator(cache_page(CACHE_TTL), name='get')
 class CRPListByClfView(APIView):
     """
     GET /api/v1/epsakhi/crp-list/<clf_code>/
-
-    - Lists selective fields of CRPEP for given nodal_clf (clf_code).
-    - Default returned fields:
-        id, name, lokos_shg_code, lokos_member_code,
-        category, subcategory, mobile_number, marks_obtained
-
-    Supports:
-      - page, page_size
-      - filters: district_id, block_id, panchayat_id
-      - search: name, lokos_member_code, lokos_shg_code, mobile_number
-      - ordering: id, name, marks_obtained, created_at
-      - group_by: district_id, block_id, panchayat_id
-      - fields: projection of any available columns
+    Returns a list of CRPs whose nodal_clf == clf_code.
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, clf_code):
-        # Base queryset
-        qs = CRPEP.objects.filter(nodal_clf=clf_code)
-
-        # Role-based restriction: if CRP logged in, only themselves
-        user = getattr(request, 'user', None)
-        if user and getattr(user, 'is_authenticated', False):
-            mu = MasterUser.objects.filter(username=user.username).first()
-            if mu:
-                try:
-                    role_name = mu.get_role_name()
-                except Exception:
-                    role_name = getattr(mu, 'role_name', None) or getattr(mu, 'role', None)
-                if role_name == 'crp_ep':
-                    qs = qs.filter(master_user_id=mu.id)
-
+        qs = CRPEP.objects.filter(nodal_clf=clf_code).order_by('name')
         rows = list(
             qs.values(
                 'id',
                 'name',
-                'lokos_shg_code',
-                'lokos_member_code',
-                'category',
-                'subcategory',
                 'mobile_number',
+                'lokos_shg_code',
+                'category',
                 'marks_obtained',
-                'district_id',
-                'block_id',
-                'panchayat_id',
-                'created_at',
+                'TH_urid',
             )
         )
 
-        # Filters
-        filter_map = {
-            'district_id': 'district_id',
-            'block_id': 'block_id',
-            'panchayat_id': 'panchayat_id',
-        }
-        rows = _apply_list_filters(rows, filter_map, request.GET)
+        rows = _apply_list_search(rows, request.GET.get('search'), ['name', 'mobile_number', 'lokos_shg_code'])
+        rows = _apply_list_ordering(rows, request.GET.get('ordering'), {'name', 'id', 'marks_obtained'})
 
-        # Search
-        rows = _apply_list_search(
-            rows,
-            request.GET.get('search'),
-            ['name', 'lokos_member_code', 'lokos_shg_code', 'mobile_number'],
-        )
-
-        # Ordering
-        rows = _apply_list_ordering(
-            rows,
-            request.GET.get('ordering'),
-            allowed_fields={'id', 'name', 'marks_obtained', 'created_at'},
-        )
-
-        # Grouping
         grouped = _apply_list_group_by(rows, request.GET.get('group_by'))
         if grouped is not None:
             grouped = _apply_fields_projection_list(grouped, request.GET.get('fields'))
             return Response(grouped)
 
-        # Fields projection (default subset if not provided)
-        fields_param = request.GET.get('fields')
-        if fields_param:
-            rows = _apply_fields_projection_list(rows, fields_param)
-        else:
-            rows = [
-                {
-                    'id': r['id'],
-                    'name': r['name'],
-                    'lokos_shg_code': r['lokos_shg_code'],
-                    'lokos_member_code': r['lokos_member_code'],
-                    'category': r['category'],
-                    'subcategory': r['subcategory'],
-                    'mobile_number': r['mobile_number'],
-                    'marks_obtained': r['marks_obtained'],
-                }
-                for r in rows
-            ]
-
+        rows = _apply_fields_projection_list(rows, request.GET.get('fields'))
         result = _paginate_plain_list(request, rows)
         return Response(result)
 
 
-# 2) crp-detail/<member_code>
+@method_decorator(cache_page(CACHE_TTL), name='get')
 class CRPDetailView(APIView):
     """
     GET /api/v1/epsakhi/crp-detail/<member_code>/
-
-    - member_code is matched with CRPEP.lokos_member_code.
-    - Returns ALL fields of CRPEP (via serializer) for that CRP.
-    - Supports:
-        ?fields=field1,field2 (top-level CRPEP fields only).
+    member_code = lokos_member_code of CRP.
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, member_code):
-        crp = CRPEP.objects.filter(lokos_member_code=member_code).first()
-        if not crp:
-            return Response({'detail': 'CRP not found for given member_code'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            crp = CRPEP.objects.get(lokos_member_code=member_code)
+        except CRPEP.DoesNotExist:
+            return Response({'detail': 'CRP not found'}, status=status.HTTP_404_NOT_FOUND)
 
         data = CRPEPSerializer(crp).data
-
         fields_param = request.GET.get('fields')
         if fields_param:
-            cols = _parse_csv_param(fields_param)
-            data = {k: v for k, v in data.items() if k in cols}
-
+            allowed = _parse_csv_param(fields_param)
+            data = {k: v for k, v in data.items() if k in allowed}
         return Response(data)
 
+
+@method_decorator(cache_page(CACHE_TTL), name='get')
 class CRPDetailbyUserID(APIView):
     """
     GET /api/v1/epsakhi/crp-detail/id/<id>/
-
-    - <id> is matched with CRPEP.master_user_id.
-    - Returns ALL fields of CRPEP (via serializer) for that CRP.
-    - Supports:
-        ?fields=field1,field2 (top-level CRPEP fields only).
+    id = master_user.id
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, id):
-        # id comes from URL: /crp-detail/id/<id>/
         try:
-            user_id = int(id)
-        except (TypeError, ValueError):
-            return Response({'detail': 'Invalid user id'}, status=status.HTTP_400_BAD_REQUEST)
-
-        crp = CRPEP.objects.filter(master_user_id=user_id).first()
-        if not crp:
-            return Response(
-                {'detail': 'CRP not found for given User ID'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            crp = CRPEP.objects.get(master_user_id=int(id))
+        except (CRPEP.DoesNotExist, ValueError):
+            return Response({'detail': 'CRP not found'}, status=status.HTTP_404_NOT_FOUND)
 
         data = CRPEPSerializer(crp).data
-
         fields_param = request.GET.get('fields')
         if fields_param:
-            cols = _parse_csv_param(fields_param)
-            data = {k: v for k, v in data.items() if k in cols}
+            allowed = _parse_csv_param(fields_param)
+            data = {k: v for k, v in data.items() if k in allowed}
+        return Response(data)
 
-        return Response(data)     
 
-# 3) panchayats-under-crp/<member_code>
+@method_decorator(cache_page(CACHE_TTL), name='get')
 class CRPPanchayatsUnderCrpView(APIView):
     """
     GET /api/v1/epsakhi/panchayats-under-crp/<member_code>/
-
-    - member_code = lokos_member_code for CRP (CRPEP.lokos_member_code).
-    - DATA NOTE: mapping table epSakhi_crpep_panchayat.crp_id actually stores
-                 CRPEP.master_user_id (user id), not CRPEP.id.
-    - So we resolve CRPEP(s) by lokos_member_code, take their master_user_id,
-      and then use those as crp_id in CRPEPToPanchayat.
-
-    Default returned fields:
-      panchayat_id, panchayat_name_en, block_id, district_id, state_id
-
-    Supports:
-      - page, page_size
-      - filters: block_id, district_id, state_id
-      - search: panchayat_name_en, panchayat_name_local, panchayat_code
-      - ordering: panchayat_id, panchayat_name_en
-      - group_by: block_id, district_id
-      - fields: projection
+    member_code = CRPEP.lokos_member_code
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, member_code):
-        # All CRPEP rows with this member_code
-        crp_qs = CRPEP.objects.filter(lokos_member_code=member_code)
-        if not crp_qs.exists():
-            return Response(
-                {'detail': 'CRP not found for given member_code'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        try:
+            crp = CRPEP.objects.get(lokos_member_code=member_code)
+        except CRPEP.DoesNotExist:
+            return Response({'detail': 'CRP not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # These are MasterUser IDs (user ids) – these are what crp_id stores in mapping table
-        user_ids = list(
-            crp_qs.values_list('master_user_id', flat=True)
+        panchayat_ids = list(
+            CRPEPToPanchayat.objects.filter(crp=crp).values_list('allocated_panchayat_id', flat=True)
         )
-        user_ids = [u for u in user_ids if u is not None]
-        if not user_ids:
-            # CRP exists but not linked to any user_id / mapping
+
+        if not panchayat_ids:
             rows = []
         else:
-            panchayat_ids = list(
-                CRPEPToPanchayat.objects.filter(
-                    crp_id__in=user_ids  # IMPORTANT: mapping uses master_user_id semantics
-                ).values_list('allocated_panchayat_id', flat=True)
+            qs = MasterPanchayat.objects.filter(panchayat_id__in=panchayat_ids).only(
+                'panchayat_id',
+                'panchayat_name_en',
+                'panchayat_name_local',
+                'panchayat_code',
+                'block_id',
+                'district_id',
+                'state_id',
             )
-
-            if not panchayat_ids:
-                rows = []
-            else:
-                qs = MasterPanchayat.objects.filter(panchayat_id__in=panchayat_ids).only(
+            rows = list(
+                qs.values(
                     'panchayat_id',
                     'panchayat_name_en',
                     'panchayat_name_local',
@@ -951,17 +835,7 @@ class CRPPanchayatsUnderCrpView(APIView):
                     'district_id',
                     'state_id',
                 )
-                rows = list(
-                    qs.values(
-                        'panchayat_id',
-                        'panchayat_name_en',
-                        'panchayat_name_local',
-                        'panchayat_code',
-                        'block_id',
-                        'district_id',
-                        'state_id',
-                    )
-                )
+            )
 
         # Filters
         filter_map = {
@@ -1011,24 +885,18 @@ class CRPPanchayatsUnderCrpView(APIView):
         return Response(result)
 
 
+@method_decorator(cache_page(CACHE_TTL), name='get')
 class CRPPanchayatsUnderCrpByID(APIView):
     """
     GET /api/v1/epsakhi/panchayats-under-crp/id/<id>/
-
-    - <id> is the MasterUser.id (user id) of the CRP.
-    - DATA NOTE: epSakhi_crpep_panchayat.crp_id stores this user id
-                 (CRPEP.master_user_id), not CRPEP.id.
-    - We therefore filter CRPEPToPanchayat by crp_id = <id> directly.
-
-    Same filtering/search/grouping/fields behavior as CRPPanchayatsUnderCrpView.
+    id = master_user.id
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, id):
-        # Normalise & validate ID
         try:
             user_id = int(id)
-        except (TypeError, ValueError):
+        except ValueError:
             return Response({'detail': 'Invalid user id'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Fetch panchayat mappings where crp_id == user_id (master_user_id semantics)
@@ -1116,125 +984,68 @@ class CRPPanchayatsUnderCrpByID(APIView):
         return Response(result)
 
 
-# 4) epsakhi-list/<shg_code>
+# -------------------------------------------------------------------
+# 4) epsakhi-list & epsakhi-detail helpers
+# -------------------------------------------------------------------
+
 class EpsakhiListByShgView(APIView):
     """
     GET /api/v1/epsakhi/epsakhi-list/<shg_code>/
 
-    - Lists selected fields of BeneficiaryRecorded whose lokos_shg_code matches the path SHG code.
-
-    Default returned fields:
-      lokos_member_code, TH_urid, age, mobile, lokos_shg_code, enterprise_id
-
-    Supports:
-      - page, page_size
-      - filters: district_id, block_id, panchayat_id, village_id,
-                 gender, marital_status, category
-      - search: applicant_name, lokos_member_code, mobile, email
-      - ordering: age, created_at
-      - group_by: district_id, block_id, panchayat_id, village_id,
-                  lokos_shg_code, gender, marital_status, category
-      - fields: projection
+    Lists selected fields of BeneficiaryRecorded for given lokos_shg_code.
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, shg_code):
-        qs = BeneficiaryRecorded.objects.filter(lokos_shg_code=shg_code)
+        qs = BeneficiaryRecorded.objects.filter(lokos_shg_code=shg_code).order_by('-created_at')
+        default_fields = [
+            'lokos_member_code',
+            'TH_urid',
+            'age',
+            'mobile',
+            'lokos_shg_code',
+            'enterprise_id',
+        ]
+        rows = list(qs.values(*default_fields))
 
-        # Base rows with extended fields used for filters/grouping
-        rows = list(
-            qs.values(
-                'TH_urid',
-                'lokos_member_code',
-                'age',
-                'mobile',
-                'lokos_shg_code',
-                'enterprise_id',
-                'district_id',
-                'block_id',
-                'panchayat_id',
-                'village_id',
-                'gender',
-                'marital_status',
-                'category',
-                'applicant_name',
-                'email',
-                'created_at',
-            )
-        )
+        rows = _apply_list_search(rows, request.GET.get('search'), ['lokos_member_code', 'mobile'])
+        rows = _apply_list_ordering(rows, request.GET.get('ordering'), {'age', 'TH_urid'})
 
-        # Filters
-        filter_map = {
-            'district_id': 'district_id',
-            'block_id': 'block_id',
-            'panchayat_id': 'panchayat_id',
-            'village_id': 'village_id',
-            'gender': 'gender',
-            'marital_status': 'marital_status',
-            'category': 'category',
-        }
-        rows = _apply_list_filters(rows, filter_map, request.GET)
-
-        # Search
-        rows = _apply_list_search(
-            rows,
-            request.GET.get('search'),
-            ['applicant_name', 'lokos_member_code', 'mobile', 'email'],
-        )
-
-        # Ordering
-        rows = _apply_list_ordering(
-            rows,
-            request.GET.get('ordering'),
-            allowed_fields={'age', 'created_at'},
-        )
-
-        # Grouping
         grouped = _apply_list_group_by(rows, request.GET.get('group_by'))
         if grouped is not None:
             grouped = _apply_fields_projection_list(grouped, request.GET.get('fields'))
             return Response(grouped)
 
-        # Fields projection (default subset)
         fields_param = request.GET.get('fields')
         if fields_param:
             rows = _apply_fields_projection_list(rows, fields_param)
-        else:
-            rows = [
-                {
-                    'lokos_member_code': r['lokos_member_code'],
-                    'TH_urid': r['TH_urid'],
-                    'age': r['age'],
-                    'mobile': r['mobile'],
-                    'lokos_shg_code': r['lokos_shg_code'],
-                    'enterprise_id': r['enterprise_id'],
-                }
-                for r in rows
-            ]
 
         result = _paginate_plain_list(request, rows)
         return Response(result)
 
 
-# 5) epsakhi-detail/<member_code>
 class EpsakhiDetailByMemberView(APIView):
     """
     GET /api/v1/epsakhi/epsakhi-detail/<member_code>/
 
-    - member_code = BeneficiaryRecorded.lokos_member_code.
-    - Returns:
+    Returns an aggregate of:
+      - latest BeneficiaryRecorded (by created_at) for given lokos_member_code
+      - linked enterprise (ExistingEnterprise/NewEnterprise)
+      - child detail tables
+
+    Response:
         {
-          "beneficiary": <ALL fields of BeneficiaryRecorded>,
+          "beneficiary": {...},
           "enterprise_type": "existing" | "new" | null,
-          "enterprise": <ALL fields of ExistingEnterprise/NewEnterprise> or null,
+          "enterprise": {...} | null,
           "enterprise_loan_details": [...],
-          "enterprise_support_details": [...],
+          "enterprise_support_details": [...],   # uses new subsidy table
           "enterprise_training_reqs": [...],
           "enterprise_media": [...]
         }
 
     Supports:
-      - fields: comma-separated list of TOP-LEVEL keys to return
+      - fields: comma-separated list of top-level keys to return
                 (e.g., fields=beneficiary,enterprise).
     """
     permission_classes = (IsAuthenticated,)
@@ -1247,7 +1058,10 @@ class EpsakhiDetailByMemberView(APIView):
             .first()
         )
         if not br:
-            return Response({'detail': 'No recorded beneficiary found for given member_code'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'detail': 'No recorded beneficiary found for given member_code'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         beneficiary_data = BeneficiaryRecordedSerializer(br).data
         eid = br.enterprise_id

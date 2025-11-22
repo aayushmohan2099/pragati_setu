@@ -1,22 +1,28 @@
 # epSakhi/api/serializers.py
 
+from django.db import transaction
 from rest_framework import serializers
+
 from epSakhi.models import (
     CRPEP,
     BeneficiaryRecorded,
     ExistingEnterprise,
     NewEnterprise,
     EnterpriseLoanDetail,
-    EnterpriseSupportDetail,
+    EnterpriseSubsidyDetail,   # NEW model name (replaces EnterpriseSupportDetail)
     EnterpriseTrainingReq,
     EnterpriseMedia,
+    EnterpriseProduct,         # NEW
+    EnterpriseTypeCategory,    # NEW
+    NoEnterpriseForm,          # NEW
+    NoEnterpriseWage,          # NEW
 )
+
 from core.api.serializers import (
     MasterPanchayatListSerializer,
     MasterBlockListSerializer,
     MasterDistrictListSerializer,
 )
-from django.db import transaction
 
 
 class CRPEPSerializer(serializers.ModelSerializer):
@@ -72,7 +78,7 @@ class BeneficiaryRecordedSerializer(serializers.ModelSerializer):
 class EnterpriseLoanDetailSerializer(serializers.ModelSerializer):
     """
     Used by:
-      - /enterprise-loan-details/ 
+      - /enterprise-loan-details/
       - (Optionally) nested in ExistingEnterpriseSerializer for read operations.
     """
     class Meta:
@@ -82,18 +88,21 @@ class EnterpriseLoanDetailSerializer(serializers.ModelSerializer):
 
 class EnterpriseSupportDetailSerializer(serializers.ModelSerializer):
     """
-    Used by:
-      - /enterprise-support-details/ 
+    NOTE:
+    - Class name kept for backward compatibility.
+    - Underlying model is now EnterpriseSubsidyDetail (epSakhi_exEpSubsidy).
+    - Used by:
+        * /enterprise-support-details/
     """
     class Meta:
-        model = EnterpriseSupportDetail
+        model = EnterpriseSubsidyDetail
         fields = '__all__'
 
 
 class EnterpriseTrainingReqSerializer(serializers.ModelSerializer):
     """
     Used by:
-      - /enterprise-training-reqs/ 
+      - /enterprise-training-reqs/
     """
     class Meta:
         model = EnterpriseTrainingReq
@@ -103,7 +112,7 @@ class EnterpriseTrainingReqSerializer(serializers.ModelSerializer):
 class EnterpriseMediaSerializer(serializers.ModelSerializer):
     """
     Used by:
-      - /enterprise-media/ 
+      - /enterprise-media/
     """
     class Meta:
         model = EnterpriseMedia
@@ -114,19 +123,15 @@ class EnterpriseMediaSerializer(serializers.ModelSerializer):
 
 class ExistingEnterpriseSerializer(serializers.ModelSerializer):
     """
-    NOTE:
-    - Frontend will now generally create/update child rows using their own APIs
-      (/enterprise-loan-details/, /enterprise-support-details/, etc).
-    - The nested write logic below is kept for backward compatibility; if
-      `loan_details`, `support_detail`, `training_reqs`, or `media` are not
-      sent in the payload, they are simply ignored and no child rows are touched.
+    ExistingEnterprise main form.
 
-    Nested write-only fields (optional):
+    Nested write-only fields (OPTIONAL, kept for backward compatibility):
+      - loan_details: [ {...}, ... ]
+      - support_detail: { ... }
+      - training_reqs: [ {...}, ... ]
+      - media: { ... }
 
-    - loan_details: [ { institution_name, loan_amount, date_taken, repayment_status }, ... ]
-    - support_detail: { department_name, scheme_name, ..., other_support }
-    - training_reqs: [ { skill_name, training_type, any_specific_scheme, any_specific_department }, ... ]
-    - media: { photo_entrepreneur, photo_enterprise, open_box_photo, close_box_photo, others, certificates }
+    If these keys are omitted in payload, child tables are untouched.
     """
 
     loan_details = EnterpriseLoanDetailSerializer(
@@ -145,17 +150,15 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExistingEnterprise
         fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at', 'deleted_at', 'TH_urid']
+        read_only_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
     @transaction.atomic
     def create(self, validated_data):
-        # Pop nested data
-        loan_data = validated_data.pop('loan_details', [])
+        loan_data = validated_data.pop('loan_details', None)
         support_data = validated_data.pop('support_detail', None)
-        training_data = validated_data.pop('training_reqs', [])
+        training_data = validated_data.pop('training_reqs', None)
         media_data = validated_data.pop('media', None)
 
-        # Create main enterprise
         enterprise = super().create(validated_data)
         enterprise_id = enterprise.TH_urid
 
@@ -166,13 +169,10 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
                     enterprise_id=enterprise_id,
                     **ld
                 )
-            # keep has_taken_loan in sync
-            enterprise.has_taken_loan = True
-            enterprise.save(update_fields=['has_taken_loan'])
 
-        # ----- Support detail (single row) -----
+        # ----- Subsidy (support) detail -----
         if support_data:
-            EnterpriseSupportDetail.objects.create(
+            EnterpriseSubsidyDetail.objects.create(
                 enterprise_id=enterprise_id,
                 **support_data
             )
@@ -185,8 +185,7 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
                     **tr
                 )
 
-        # ----- Media (single row) -----
-        # NOTE: for real file uploads, prefer /enterprise-media/
+        # ----- Media -----
         if media_data:
             EnterpriseMedia.objects.create(
                 enterprise_id=enterprise_id,
@@ -197,7 +196,6 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        # Pop nested data if present; if not present, we leave related rows untouched.
         loan_data = validated_data.pop('loan_details', None)
         support_data = validated_data.pop('support_detail', None)
         training_data = validated_data.pop('training_reqs', None)
@@ -209,22 +207,17 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
         # ----- Loan details -----
         if loan_data is not None:
             EnterpriseLoanDetail.objects.filter(enterprise_id=enterprise_id).delete()
-            if loan_data:
-                for ld in loan_data:
-                    EnterpriseLoanDetail.objects.create(
-                        enterprise_id=enterprise_id,
-                        **ld
-                    )
-                enterprise.has_taken_loan = True
-            else:
-                enterprise.has_taken_loan = False
-            enterprise.save(update_fields=['has_taken_loan'])
+            for ld in loan_data:
+                EnterpriseLoanDetail.objects.create(
+                    enterprise_id=enterprise_id,
+                    **ld
+                )
 
-        # ----- Support detail -----
+        # ----- Subsidy (support) detail -----
         if support_data is not None:
-            EnterpriseSupportDetail.objects.filter(enterprise_id=enterprise_id).delete()
+            EnterpriseSubsidyDetail.objects.filter(enterprise_id=enterprise_id).delete()
             if support_data:
-                EnterpriseSupportDetail.objects.create(
+                EnterpriseSubsidyDetail.objects.create(
                     enterprise_id=enterprise_id,
                     **support_data
                 )
@@ -232,12 +225,11 @@ class ExistingEnterpriseSerializer(serializers.ModelSerializer):
         # ----- Training requirements -----
         if training_data is not None:
             EnterpriseTrainingReq.objects.filter(enterprise_id=enterprise_id).delete()
-            if training_data:
-                for tr in training_data:
-                    EnterpriseTrainingReq.objects.create(
-                        enterprise_id=enterprise_id,
-                        **tr
-                    )
+            for tr in training_data:
+                EnterpriseTrainingReq.objects.create(
+                    enterprise_id=enterprise_id,
+                    **tr
+                )
 
         # ----- Media -----
         if media_data is not None:
@@ -256,3 +248,41 @@ class NewEnterpriseSerializer(serializers.ModelSerializer):
         model = NewEnterprise
         fields = '__all__'
         read_only_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
+
+
+# ============= NEW DETAIL MODELS =============
+
+class EnterpriseProductSerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_exEpProduct
+    """
+    class Meta:
+        model = EnterpriseProduct
+        fields = '__all__'
+
+
+class EnterpriseTypeCategorySerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_epType
+    """
+    class Meta:
+        model = EnterpriseTypeCategory
+        fields = '__all__'
+
+
+class NoEnterpriseFormSerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_noEpForm
+    """
+    class Meta:
+        model = NoEnterpriseForm
+        fields = '__all__'
+
+
+class NoEnterpriseWageSerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_noEpWage
+    """
+    class Meta:
+        model = NoEnterpriseWage
+        fields = '__all__'

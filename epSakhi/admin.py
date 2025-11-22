@@ -9,7 +9,7 @@ from .models import (
     ExistingEnterprise,
     NewEnterprise,
     EnterpriseLoanDetail,
-    EnterpriseSupportDetail,
+    EnterpriseSubsidyDetail,
     EnterpriseTrainingReq,
     EnterpriseMedia,
 )
@@ -154,13 +154,6 @@ class NewEnterpriseAdmin(admin.ModelAdmin):
 class EnterpriseLoanDetailAdmin(admin.ModelAdmin):
     list_display = ('TH_urid', 'enterprise_id', 'institution_name', 'loan_amount', 'date_taken', 'repayment_status', 'created_at')
     search_fields = ['enterprise_id', 'institution_name']
-    readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
-
-
-@admin.register(EnterpriseSupportDetail)
-class EnterpriseSupportDetailAdmin(admin.ModelAdmin):
-    list_display = ('TH_urid', 'enterprise_id', 'department_name', 'scheme_name', 'date_taken', 'created_at')
-    search_fields = ['enterprise_id', 'department_name', 'scheme_name']
     readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
 

@@ -1,28 +1,43 @@
-from rest_framework.routers import DefaultRouter
+# epSakhi/api/urls.py
+
 from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 
 from .views import (
+    # main viewsets
     CRPEPViewSet,
     CRPPanchayatMappingViewSet,
     BeneficiaryRecordedViewSet,
     ExistingEnterpriseViewSet,
     NewEnterpriseViewSet,
-    UpsrlmShgListView,
-    UpsrlmShgMembersView,
-    UpsrlmShgDetailView,
-    # NEW epSakhi APIs
-    CRPListByClfView,
-    CRPDetailView,
-    CRPPanchayatsUnderCrpView,
-    EpsakhiListByShgView,
-    EpsakhiDetailByMemberView,
-    CRPDetailbyUserID,
-    CRPPanchayatsUnderCrpByID,
-    # NEW: child enterprise viewsets
+
+    # child table viewsets
     EnterpriseLoanDetailViewSet,
     EnterpriseSupportDetailViewSet,
     EnterpriseTrainingReqViewSet,
     EnterpriseMediaViewSet,
+
+    # NEW child viewsets
+    EnterpriseProductViewSet,
+    EnterpriseTypeCategoryViewSet,
+    NoEnterpriseFormViewSet,
+    NoEnterpriseWageViewSet,
+
+    # SHG proxy endpoints
+    UpsrlmShgListView,
+    UpsrlmShgMembersView,
+    UpsrlmShgDetailView,
+
+    # CRP helper APIs
+    CRPListByClfView,
+    CRPDetailView,
+    CRPDetailbyUserID,
+    CRPPanchayatsUnderCrpView,
+    CRPPanchayatsUnderCrpByID,
+
+    # epSakhi helper APIs
+    EpsakhiListByShgView,
+    EpsakhiDetailByMemberView,
 )
 
 router = DefaultRouter()
@@ -31,11 +46,17 @@ router.register('recorded-beneficiaries', BeneficiaryRecordedViewSet, basename='
 router.register('existing-enterprise', ExistingEnterpriseViewSet, basename='existing-enterprise')
 router.register('new-enterprise', NewEnterpriseViewSet, basename='new-enterprise')
 
-# NEW: child table routers
+# child table routers
 router.register('enterprise-loan-details', EnterpriseLoanDetailViewSet, basename='enterprise-loan-details')
 router.register('enterprise-support-details', EnterpriseSupportDetailViewSet, basename='enterprise-support-details')
 router.register('enterprise-training-reqs', EnterpriseTrainingReqViewSet, basename='enterprise-training-reqs')
 router.register('enterprise-media', EnterpriseMediaViewSet, basename='enterprise-media')
+
+# NEW: extra detail routers
+router.register('enterprise-products', EnterpriseProductViewSet, basename='enterprise-products')
+router.register('enterprise-types', EnterpriseTypeCategoryViewSet, basename='enterprise-types')
+router.register('no-enterprise-forms', NoEnterpriseFormViewSet, basename='no-enterprise-forms')
+router.register('no-enterprise-wages', NoEnterpriseWageViewSet, basename='no-enterprise-wages')
 
 mapping_urls = [
     path(
