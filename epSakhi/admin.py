@@ -12,6 +12,10 @@ from .models import (
     EnterpriseSubsidyDetail,
     EnterpriseTrainingReq,
     EnterpriseMedia,
+    EnterpriseProduct,
+    EnterpriseTypeCategory,
+    NoEnterpriseForm,
+    NoEnterpriseWage,
 )
 
 
@@ -106,8 +110,9 @@ class ExistingEnterpriseAdmin(admin.ModelAdmin):
         'enterprise_name',
         'recorded_benef_id_link',
         'year_of_establishment',
-        'enterprise_type',
-        'number_of_employees',
+        'total_emp',
+        'number_of_shg_emp',
+        'monthly_income_estimate',
         'created_at',
     )
     search_fields = ['enterprise_name', 'recorded_benef_id']
@@ -130,12 +135,14 @@ class NewEnterpriseAdmin(admin.ModelAdmin):
     list_display = (
         'TH_urid',
         'recorded_benef_id_link',
-        'req_skill_training',
-        'req_financial_assistance',
+        'applicant_special_category',
+        'has_shg_cif',
+        'is_training_received',
+        'is_training_required',
         'declaration_confirmed',
         'created_at',
     )
-    search_fields = ['recorded_benef_id']
+    search_fields = ['recorded_benef_id', 'applicant_special_category']
     readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
     def recorded_benef_id_link(self, obj):
@@ -152,21 +159,59 @@ class NewEnterpriseAdmin(admin.ModelAdmin):
 
 @admin.register(EnterpriseLoanDetail)
 class EnterpriseLoanDetailAdmin(admin.ModelAdmin):
-    list_display = ('TH_urid', 'enterprise_id', 'institution_name', 'loan_amount', 'date_taken', 'repayment_status', 'created_at')
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'form_type',
+        'institution_name',
+        'loan_amount',
+        'date_taken',
+        'repayment_status',
+        'created_at',
+    )
     search_fields = ['enterprise_id', 'institution_name']
+    readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
+
+
+@admin.register(EnterpriseSubsidyDetail)
+class EnterpriseSubsidyDetailAdmin(admin.ModelAdmin):
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'subsidy_type',
+        'subsidy_name',
+        'created_at',
+    )
+    search_fields = ['enterprise_id', 'subsidy_type', 'subsidy_name']
     readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
 
 @admin.register(EnterpriseTrainingReq)
 class EnterpriseTrainingReqAdmin(admin.ModelAdmin):
-    list_display = ('TH_urid', 'enterprise_id', 'skill_name', 'training_type', 'created_at')
-    search_fields = ['enterprise_id', 'skill_name']
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'form_type',
+        'training_module_name',
+        'sector',
+        'department',
+        'duration',
+        'created_at',
+    )
+    search_fields = ['enterprise_id', 'training_module_name', 'sector', 'department']
     readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
 
 @admin.register(EnterpriseMedia)
 class EnterpriseMediaAdmin(admin.ModelAdmin):
-    list_display = ('TH_urid', 'enterprise_id', 'photo_entrepreneur_present', 'photo_enterprise_present', 'created_at')
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'form_type',
+        'photo_entrepreneur_present',
+        'photo_enterprise_present',
+        'created_at',
+    )
     search_fields = ['enterprise_id']
     readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
@@ -179,3 +224,64 @@ class EnterpriseMediaAdmin(admin.ModelAdmin):
         return bool(getattr(obj, 'photo_enterprise'))
     photo_enterprise_present.boolean = True
     photo_enterprise_present.short_description = 'Photo (enterprise)'
+
+
+@admin.register(EnterpriseProduct)
+class EnterpriseProductAdmin(admin.ModelAdmin):
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'main_product_name',
+        'activity_or_product_type',
+        'sales_area',
+        'avg_monthly_sales',
+        'created_at',
+    )
+    search_fields = ['enterprise_id', 'main_product_name', 'activity_or_product_type']
+    readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
+
+
+@admin.register(EnterpriseTypeCategory)
+class EnterpriseTypeCategoryAdmin(admin.ModelAdmin):
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'form_type',
+        'parent_category',
+        'sub_category',
+        'created_at',
+    )
+    search_fields = ['enterprise_id', 'parent_category', 'sub_category']
+    readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
+
+
+@admin.register(NoEnterpriseForm)
+class NoEnterpriseFormAdmin(admin.ModelAdmin):
+    list_display = (
+        'TH_urid',
+        'recorded_benef_id',
+        'if_shg_member_inv',
+        'is_training_required',
+        'future_willing',
+        'has_shg_cif',
+        'cif_fund_amt',
+        'created_at',
+    )
+    search_fields = ['recorded_benef_id']
+    readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
+
+
+@admin.register(NoEnterpriseWage)
+class NoEnterpriseWageAdmin(admin.ModelAdmin):
+    list_display = (
+        'TH_urid',
+        'enterprise_id',
+        'placement_sector',
+        'type_of_emp',
+        'exp_salary',
+        'location_scope',
+        'location',
+        'created_at',
+    )
+    search_fields = ['enterprise_id', 'placement_sector', 'location']
+    readonly_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']

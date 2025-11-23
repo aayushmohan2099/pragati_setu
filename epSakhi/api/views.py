@@ -270,6 +270,13 @@ class UpsrlmShgMembersView(APIView):
                 members = [m for m in members if m.get('aadhar_verified')]
             else:
                 members = [m for m in members if not m.get('aadhar_verified')]
+        
+        if request.GET.get('pld_status') is not None:
+            av = request.GET.get('pld_status')
+            if av.lower() in ('1', 'true', 'yes'):
+                members = [m for m in members if m.get('pld_status')]
+            else:
+                members = [m for m in members if not m.get('pld_status')]
 
         for f in ('gender', 'religion', 'social_category'):
             if request.GET.get(f):
