@@ -14,6 +14,7 @@ from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
+from core.upsrlm_sync import sync_clf_list, sync_clf_detail
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,6 @@ UPSRLM_APISETU_BASE = getattr(
 )
 
 UPSRLM_CACHE_TTL = getattr(settings, "CACHE_TTL", 300)
-
 
 def get_apisetu_headers() -> Dict[str, str]:
     """
@@ -214,14 +214,10 @@ def group_json_list(
     counters = defaultdict(int)
     for item in data:
         key_vals = []
-        skip = False
         for field_name in chosen:
             json_field = allowed_group_by[field_name]
             key_val = item.get(json_field)
-            # we allow None; it will group together
             key_vals.append(key_val)
-        if skip:
-            continue
         counters[tuple(key_vals)] += 1
 
     results = []
@@ -272,6 +268,7 @@ class BaseUpsrlmView(APIView):
       - Provide pagination over Python lists.
     """
 
+    # NOTE: individual views can override this (e.g. IsAuthenticated)
     permission_classes = (permissions.AllowAny,)
     pagination_class = SimpleListPagination
     cache_ttl = UPSRLM_CACHE_TTL
@@ -295,7 +292,7 @@ class BaseUpsrlmView(APIView):
         params: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """
-        Fetch from UPSRLM+APISetu with caching.
+        Fetch from UPSRLM+APISetu with caching + master_* sync.
         """
         cached = cache.get(cache_key)
         if cached is not None:
@@ -323,13 +320,25 @@ class BaseUpsrlmView(APIView):
         except ValueError:
             raise RuntimeError("Invalid JSON from UPSRLM API")
 
+        # NEW: sync into master_* tables based on which endpoint this is
+        try:
+            if path == "clf/block":
+                block_id = (params or {}).get("block_id")
+                if block_id is not None:
+                    sync_clf_list(int(block_id), data)
+            elif path == "clf":
+                sync_clf_detail(data)
+            # you can later add VO sync here if you create VO master tables
+        except Exception:
+            logger.exception("Failed to sync UPSRLM CLF data for path=%s params=%s", path, params)
+
         cache.set(cache_key, data, timeout=self.cache_ttl)
         return data
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 1. CLF list by block (upsrlm-clf-list/<block_id>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmClfListView(BaseUpsrlmView):
@@ -395,9 +404,9 @@ class UpsrlmClfListView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 2. CLF detail (core info) (upsrlm-clf-detail/<clf_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmClfDetailView(BaseUpsrlmView):
@@ -531,9 +540,9 @@ class UpsrlmClfDetailView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 3. CLF VO list (upsrlm-clf-vo/<clf_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmClfVoListView(BaseUpsrlmView):
@@ -583,9 +592,9 @@ class UpsrlmClfVoListView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 4. Panchayats in CLF (upsrlm-panchayats-in-clf/<clf_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmClfPanchayatListView(BaseUpsrlmView):
@@ -695,9 +704,9 @@ class UpsrlmClfPanchayatListView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 5. CLF Members (upsrlm-clf-members/<clf_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmClfMembersView(BaseUpsrlmView):
@@ -760,9 +769,9 @@ class UpsrlmClfMembersView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 6. VO List by block (upsrlm-vo-list/<block_id>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmVoListView(BaseUpsrlmView):
@@ -832,9 +841,9 @@ class UpsrlmVoListView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 7. VO detail (core info) (upsrlm-vo-detail/<vo_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmVoDetailView(BaseUpsrlmView):
@@ -909,8 +918,14 @@ class UpsrlmVoDetailView(BaseUpsrlmView):
         # Apply simple filters
         def _matches(rec: Dict[str, Any]) -> bool:
             # simple top-level
-            for key in ("meeting_frequency", "registration_act_name", "pfms_verified",
-                        "clf_code", "clf_id", "clf_name"):
+            for key in (
+                "meeting_frequency",
+                "registration_act_name",
+                "pfms_verified",
+                "clf_code",
+                "clf_id",
+                "clf_name",
+            ):
                 val = request.GET.get(key)
                 if val is not None:
                     if str(rec.get(key)) != str(val):
@@ -963,9 +978,9 @@ class UpsrlmVoDetailView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 8. VO SHG list (upsrlm-vo-shg/<vo_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmVoShgListView(BaseUpsrlmView):
@@ -1021,9 +1036,9 @@ class UpsrlmVoShgListView(BaseUpsrlmView):
         return self.paginate_list(request, data)
 
 
-# -------------------------------------------------------------------
+# ===================================================================
 # 9. VO Members (upsrlm-vo-members/<vo_code>)
-# -------------------------------------------------------------------
+# ===================================================================
 
 @method_decorator(cache_page(UPSRLM_CACHE_TTL), name="get")
 class UpsrlmVoMembersView(BaseUpsrlmView):

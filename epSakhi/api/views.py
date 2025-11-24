@@ -58,6 +58,8 @@ from .serializers import (
     NoEnterpriseFormSerializer,         
     NoEnterpriseWageSerializer,         
 )
+from core.upsrlm_sync import sync_shg_list, sync_shg_detail
+
 
 # Backward-compat alias: keep old name used everywhere in code,
 # but actually point to the new model.
@@ -189,20 +191,37 @@ def _call_apisetu_shg_list(block_id: int):
     resp = requests.get(url, headers=_get_apisetu_headers(), timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(f"APISetu SHG list error {resp.status_code}: {resp.text[:200]}")
-    return resp.json()
+    data = resp.json()
+
+    # NEW: import into master_* tables on first fetch (view will cache separately)
+    try:
+        sync_shg_list(block_id, data)
+    except Exception:
+        # don't break API view if import fails
+        logger.exception("Failed to sync SHG list for block_id=%s", block_id)
+
+    return data
 
 
 def _call_apisetu_shg_detail(shg_code: str):
     template = getattr(
         settings,
         "APISETU_SHG_DETAIL_URL_TEMPLATE",
-        "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg/detail?shg_code={shg_code}",
+        "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg?shg_code={shg_code}",
     )
     url = template.format(shg_code=shg_code)
     resp = requests.get(url, headers=_get_apisetu_headers(), timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(f"APISetu SHG detail error {resp.status_code}: {resp.text[:200]}")
-    return resp.json()
+    data = resp.json()
+
+    # NEW: import into master_* tables
+    try:
+        sync_shg_detail(data)
+    except Exception:
+        logger.exception("Failed to sync SHG detail for shg_code=%s", shg_code)
+
+    return data
 
 
 class UpsrlmShgListView(APIView):
