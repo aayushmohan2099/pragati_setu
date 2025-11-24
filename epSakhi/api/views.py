@@ -222,7 +222,14 @@ class UpsrlmShgListView(APIView):
                 return Response({'detail': f'Error fetching SHG list: {str(e)}'}, status=502)
             cache.set(cache_key, j, SHG_CACHE_TTL)
 
-        rows = j.get('data') or j.get('shg_list') or []
+        # APISetu sometimes returns a top-level LIST, sometimes a DICT
+        if isinstance(j, list):
+            rows = j
+        elif isinstance(j, dict):
+            rows = j.get('data') or j.get('shg_list') or j.get('shgList') or []
+        else:
+            rows = []
+
         # optional search, ordering, fields, pagination
         rows = _apply_list_search(
             rows,
@@ -242,6 +249,7 @@ class UpsrlmShgListView(APIView):
         rows = _apply_fields_projection_list(rows, request.GET.get('fields'))
         result = _paginate_plain_list(request, rows)
         return Response(result)
+
 
 
 class UpsrlmShgMembersView(APIView):
