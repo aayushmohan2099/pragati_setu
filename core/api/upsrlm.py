@@ -14,7 +14,7 @@ from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
-from core.upsrlm_sync import sync_clf_list, sync_clf_detail
+# from core.upsrlm_sync import sync_clf_list, sync_clf_detail
 
 logger = logging.getLogger(__name__)
 
@@ -320,17 +320,17 @@ class BaseUpsrlmView(APIView):
         except ValueError:
             raise RuntimeError("Invalid JSON from UPSRLM API")
 
-        # NEW: sync into master_* tables based on which endpoint this is
-        try:
-            if path == "clf/block":
-                block_id = (params or {}).get("block_id")
-                if block_id is not None:
-                    sync_clf_list(int(block_id), data)
-            elif path == "clf":
-                sync_clf_detail(data)
-            # you can later add VO sync here if you create VO master tables
-        except Exception:
-            logger.exception("Failed to sync UPSRLM CLF data for path=%s params=%s", path, params)
+        # # NEW: sync into master_* tables based on which endpoint this is
+        # try:
+        #     if path == "clf/block":
+        #         block_id = (params or {}).get("block_id")
+        #         if block_id is not None:
+        #             sync_clf_list(int(block_id), data)
+        #     elif path == "clf":
+        #         sync_clf_detail(data)
+        #     # you can later add VO sync here if you create VO master tables
+        # except Exception:
+        #     logger.exception("Failed to sync UPSRLM CLF data for path=%s params=%s", path, params)
 
         cache.set(cache_key, data, timeout=self.cache_ttl)
         return data

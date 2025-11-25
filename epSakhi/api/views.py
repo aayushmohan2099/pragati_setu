@@ -58,7 +58,7 @@ from .serializers import (
     NoEnterpriseFormSerializer,         
     NoEnterpriseWageSerializer,         
 )
-from core.upsrlm_sync import sync_shg_list, sync_shg_detail
+# from core.upsrlm_sync import sync_shg_list, sync_shg_detail
 
 
 # Backward-compat alias: keep old name used everywhere in code,
@@ -193,12 +193,12 @@ def _call_apisetu_shg_list(block_id: int):
         raise RuntimeError(f"APISetu SHG list error {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
 
-    # NEW: import into master_* tables on first fetch (view will cache separately)
-    try:
-        sync_shg_list(block_id, data)
-    except Exception:
-        # don't break API view if import fails
-        logger.exception("Failed to sync SHG list for block_id=%s", block_id)
+    # # NEW: import into master_* tables on first fetch (view will cache separately)
+    # try:
+    #     sync_shg_list(block_id, data)
+    # except Exception:
+    #     # don't break API view if import fails
+    #     logger.exception("Failed to sync SHG list for block_id=%s", block_id)
 
     return data
 
@@ -215,11 +215,11 @@ def _call_apisetu_shg_detail(shg_code: str):
         raise RuntimeError(f"APISetu SHG detail error {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
 
-    # NEW: import into master_* tables
-    try:
-        sync_shg_detail(data)
-    except Exception:
-        logger.exception("Failed to sync SHG detail for shg_code=%s", shg_code)
+    # # NEW: import into master_* tables
+    # try:
+    #     sync_shg_detail(data)
+    # except Exception:
+    #     logger.exception("Failed to sync SHG detail for shg_code=%s", shg_code)
 
     return data
 
@@ -1065,22 +1065,32 @@ class EpsakhiDetailByMemberView(APIView):
     Returns an aggregate of:
       - latest BeneficiaryRecorded (by created_at) for given lokos_member_code
       - linked enterprise (ExistingEnterprise/NewEnterprise)
+      - linked NoEnterpriseForm (if any)
       - child detail tables
 
     Response:
         {
-          "beneficiary": {...},
+          "beneficiary": {.},
           "enterprise_type": "existing" | "new" | null,
-          "enterprise": {...} | null,
-          "enterprise_loan_details": [...],
-          "enterprise_support_details": [...],   # uses new subsidy table
-          "enterprise_training_reqs": [...],
-          "enterprise_media": [...]
+          "enterprise": {.} | null,
+
+          # children for Existing / New enterprise (when BeneficiaryRecorded.enterprise_id is set)
+          "enterprise_loan_details": [.],        # EnterpriseLoanDetail (only if has_taken_loan is True for Existing)
+          "enterprise_support_details": [.],     # EnterpriseSubsidyDetail (only if has_receieved_subsidy is True for Existing)
+          "enterprise_training_reqs": [.],       # EnterpriseTrainingReq filtered by is_training_received / is_training_required
+          "enterprise_media": [.],               # EnterpriseMedia filtered by form_type (ex/new)
+          "enterprise_products": [.],            # EnterpriseProduct (existing + new)
+          "enterprise_type_categories": [.],     # EnterpriseTypeCategory (form_type ex/new)
+
+          # No-Enterprise flow (when a NoEnterpriseForm exists for this recorded beneficiary)
+          "no_enterprise_form": {.} | null,              # NoEnterpriseForm
+          "no_enterprise_training_reqs": [.],            # EnterpriseTrainingReq (enterprise_id = NoEnterpriseForm.TH_urid, form_type='req')
+          "no_enterprise_wage_details": [.],             # NoEnterpriseWage (enterprise_id = NoEnterpriseForm.TH_urid)
         }
 
     Supports:
       - fields: comma-separated list of top-level keys to return
-                (e.g., fields=beneficiary,enterprise).
+                (e.g. fields=beneficiary,enterprise).
     """
     permission_classes = (IsAuthenticated,)
 
@@ -1106,29 +1116,101 @@ class EpsakhiDetailByMemberView(APIView):
         support_data = []
         training_data = []
         media_data = []
+        product_data = []
+        type_cat_data = []
 
+        # ---------- Existing / New enterprise branch (via BeneficiaryRecorded.enterprise_id) ----------
         if eid:
             existing = ExistingEnterprise.objects.filter(TH_urid=eid).first()
             if existing:
                 enterprise_type = 'existing'
                 enterprise_data = ExistingEnterpriseSerializer(existing).data
+
+                # Loan details: only if has_taken_loan is True
+                if existing.has_taken_loan:
+                    loans = EnterpriseLoanDetail.objects.filter(enterprise_id=eid)
+                    loan_data = EnterpriseLoanDetailSerializer(loans, many=True).data
+
+                # Subsidy (support) details: only if has_receieved_subsidy is True
+                if existing.has_receieved_subsidy:
+                    supports = EnterpriseSupportDetail.objects.filter(enterprise_id=eid)
+                    support_data = EnterpriseSupportDetailSerializer(supports, many=True).data
+
+                # Training requirements:
+                #   - if is_training_received is False -> drop form_type="rec"
+                #   - if is_training_required is False -> drop form_type="req"
+                trainings_qs = EnterpriseTrainingReq.objects.filter(enterprise_id=eid)
+                if not existing.is_training_received:
+                    trainings_qs = trainings_qs.exclude(form_type='rec')
+                if not existing.is_training_required:
+                    trainings_qs = trainings_qs.exclude(form_type='req')
+                training_data = EnterpriseTrainingReqSerializer(trainings_qs, many=True).data
+
+                # Media: only for this existing enterprise (form_type="ex")
+                medias = EnterpriseMedia.objects.filter(enterprise_id=eid, form_type='ex')
+                media_data = EnterpriseMediaSerializer(medias, many=True).data
+
+                # Products: all EnterpriseProduct linked via enterprise_id
+                products = EnterpriseProduct.objects.filter(enterprise_id=eid)
+                product_data = EnterpriseProductSerializer(products, many=True).data
+
+                # Type categories: only for this existing enterprise (form_type="ex")
+                type_qs = EnterpriseTypeCategory.objects.filter(enterprise_id=eid, form_type='ex')
+                type_cat_data = EnterpriseTypeCategorySerializer(type_qs, many=True).data
+
             else:
                 new_ent = NewEnterprise.objects.filter(TH_urid=eid).first()
                 if new_ent:
                     enterprise_type = 'new'
                     enterprise_data = NewEnterpriseSerializer(new_ent).data
 
-            # related detail tables (keyed by enterprise_id = TH_urid)
-            loans = EnterpriseLoanDetail.objects.filter(enterprise_id=eid)
-            supports = EnterpriseSupportDetail.objects.filter(enterprise_id=eid)
-            trainings = EnterpriseTrainingReq.objects.filter(enterprise_id=eid)
-            medias = EnterpriseMedia.objects.filter(enterprise_id=eid)
+                    # For NewEnterprise, loan_amount is on main form; no separate LoanDetail.
+                    # Training requirements:
+                    trainings_qs = EnterpriseTrainingReq.objects.filter(enterprise_id=eid)
+                    if not new_ent.is_training_received:
+                        trainings_qs = trainings_qs.exclude(form_type='rec')
+                    if not new_ent.is_training_required:
+                        trainings_qs = trainings_qs.exclude(form_type='req')
+                    training_data = EnterpriseTrainingReqSerializer(trainings_qs, many=True).data
 
-            loan_data = EnterpriseLoanDetailSerializer(loans, many=True).data
-            support_data = EnterpriseSupportDetailSerializer(supports, many=True).data
-            training_data = EnterpriseTrainingReqSerializer(trainings, many=True).data
-            media_data = EnterpriseMediaSerializer(medias, many=True).data
+                    # Media: only for this new enterprise (form_type="new")
+                    medias = EnterpriseMedia.objects.filter(enterprise_id=eid, form_type='new')
+                    media_data = EnterpriseMediaSerializer(medias, many=True).data
 
+                    # Products: all EnterpriseProduct linked via enterprise_id
+                    products = EnterpriseProduct.objects.filter(enterprise_id=eid)
+                    product_data = EnterpriseProductSerializer(products, many=True).data
+
+                    # Type categories: only for this new enterprise (form_type="new")
+                    type_qs = EnterpriseTypeCategory.objects.filter(enterprise_id=eid, form_type='new')
+                    type_cat_data = EnterpriseTypeCategorySerializer(type_qs, many=True).data
+
+        # ---------- No-Enterprise branch (linked via recorded_benef_id) ----------
+        no_ent_form = NoEnterpriseForm.objects.filter(recorded_benef_id=br.TH_urid).first()
+        no_ent_data = None
+        no_ent_training_data = []
+        wage_data = []
+
+        if no_ent_form:
+            no_ent_data = NoEnterpriseFormSerializer(no_ent_form).data
+
+            # Training requirements (NoEnterprise):
+            #   - only when is_training_required is True
+            #   - enterprise_id in EnterpriseTrainingReq = NoEnterpriseForm.TH_urid
+            if no_ent_form.is_training_required:
+                no_ent_treqs = EnterpriseTrainingReq.objects.filter(
+                    enterprise_id=no_ent_form.TH_urid,
+                    form_type='req',
+                )
+                no_ent_training_data = EnterpriseTrainingReqSerializer(no_ent_treqs, many=True).data
+
+            # Wage preferences when reason is "Interested in Wage Employment"
+            reason = (no_ent_form.no_int_reason or '').strip()
+            if reason == 'Interested in Wage Employment':
+                wages = NoEnterpriseWage.objects.filter(enterprise_id=no_ent_form.TH_urid)
+                wage_data = NoEnterpriseWageSerializer(wages, many=True).data
+
+        # ---------- Assemble response ----------
         response_obj = {
             'beneficiary': beneficiary_data,
             'enterprise_type': enterprise_type,
@@ -1137,8 +1219,14 @@ class EpsakhiDetailByMemberView(APIView):
             'enterprise_support_details': support_data,
             'enterprise_training_reqs': training_data,
             'enterprise_media': media_data,
+            'enterprise_products': product_data,
+            'enterprise_type_categories': type_cat_data,
+            'no_enterprise_form': no_ent_data,
+            'no_enterprise_training_reqs': no_ent_training_data,
+            'no_enterprise_wage_details': wage_data,
         }
 
+        # Optional top-level field projection
         fields_param = request.GET.get('fields')
         if fields_param:
             allowed_keys = _parse_csv_param(fields_param)

@@ -234,7 +234,7 @@ class EnterpriseLoanDetail(SoftDeleteMixin):
     form_type = models.CharField(max_length=20, null=True, blank=True, help_text='existing/new/other')
 
     institution_name = models.CharField(max_length=255, null=True, blank=True)
-    loan_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    loan_amount = models.CharField(max_length=255, null=True, blank=True)
     date_taken = models.DateField(null=True, blank=True)
     repayment_status = models.CharField(max_length=100, null=True, blank=True)
 
@@ -280,12 +280,12 @@ class EnterpriseTrainingReq(SoftDeleteMixin):
     )
 
     form_type = models.CharField(max_length=20, null=True, blank=True, help_text='existing/new/other')
-    training_module_name = models.CharField(max_length=255, null=True, blank=True)
+    training_module_name = models.TextField(null=True, blank=True, help_text='Parent: Child for sectors')
     sector = models.CharField(max_length=255, null=True, blank=True)
     department = models.CharField(max_length=255, null=True, blank=True)
     duration = models.CharField(max_length=100, null=True, blank=True)
     location = models.CharField(max_length=255, null=True, blank=True)
-    expected_income = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    expected_income = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
         db_table = 'epSakhi_epTraining'
@@ -347,7 +347,7 @@ class NewEnterprise(SoftDeleteMixin):
 
     mentorship_support = models.CharField(max_length=255, null=True, blank=True)
     financial_support = models.CharField(max_length=255, null=True, blank=True)
-    loan_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    loan_amount = models.CharField(max_length=255, null=True, blank=True)
 
     market_linkage_type = models.CharField(max_length=255, null=True, blank=True)
     market_linkage_detail = models.TextField(null=True, blank=True)
@@ -438,8 +438,8 @@ class EnterpriseTypeCategory(SoftDeleteMixin):
         db_column='enterprise_id',
         help_text='TH_urid of enterprise form (existing/new)',
     )
-    parent_category = models.CharField(max_length=255, null=True, blank=True)
-    sub_category = models.CharField(max_length=255, null=True, blank=True)
+    parent_category = models.TextField(null=True, blank=True)
+    sub_category = models.TextField(null=True, blank=True)
 
     class Meta:
         db_table = 'epSakhi_epType'
@@ -462,7 +462,7 @@ class NoEnterpriseForm(SoftDeleteMixin):
     )
     recorded_benef_id = models.CharField(max_length=36, db_column='recorded_benef_id')
 
-    if_shg_member_inv = models.BooleanField(default=False, help_text='Is SHG member involved in any EP/wage activity')
+    if_shg_member_inv = models.TextField(null=True, blank=True, help_text='Is SHG member involved in any EP/wage activity')
     no_int_reason = models.TextField(null=True, blank=True)
     is_training_required = models.BooleanField(default=False)
     future_willing = models.BooleanField(default=False)
@@ -497,7 +497,7 @@ class NoEnterpriseWage(SoftDeleteMixin):
 
     placement_sector = models.CharField(max_length=255, null=True, blank=True)
     type_of_emp = models.CharField(max_length=255, null=True, blank=True)
-    exp_salary = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    exp_salary = models.CharField(max_length=255, null=True, blank=True)
     location_scope = models.CharField(max_length=255, null=True, blank=True)
     location = models.CharField(max_length=255, null=True, blank=True)
 
