@@ -1,112 +1,288 @@
 # epSakhi/api/serializers.py
+
+from django.db import transaction
 from rest_framework import serializers
-from epSakhi.models import CRPEP, BeneficiaryEnterprise
-from core.models import MasterDistrict, MasterBlock, MasterPanchayat, MasterShgList, MasterBeneficiary
 
-class MasterDistrictSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterDistrict
-        fields = ['district_id','district_name_en','district_short_name_en']
+from epSakhi.models import (
+    CRPEP,
+    BeneficiaryRecorded,
+    ExistingEnterprise,
+    NewEnterprise,
+    EnterpriseLoanDetail,
+    EnterpriseSubsidyDetail,   # NEW model name (replaces EnterpriseSupportDetail)
+    EnterpriseTrainingReq,
+    EnterpriseMedia,
+    EnterpriseProduct,         # NEW
+    EnterpriseTypeCategory,    # NEW
+    NoEnterpriseForm,          # NEW
+    NoEnterpriseWage,          # NEW
+)
 
-class MasterBlockSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterBlock
-        fields = ['block_id','block_name_en','district_id']
+from core.api.serializers import (
+    MasterPanchayatListSerializer,
+    MasterBlockListSerializer,
+    MasterDistrictListSerializer,
+)
 
-class MasterPanchayatSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterPanchayat
-        fields = ['panchayat_id','panchayat_name_en','block_id','district_id']
-
-class MasterShgSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterShgList
-        fields = ['id','shg_code','name','village_id','panchayat_id','block_id']
-
-class MasterBeneficiarySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MasterBeneficiary
-        fields = ['member_code','member_name','shg_code','village_id','panchayat_id','block_id']
 
 class CRPEPSerializer(serializers.ModelSerializer):
-    district = MasterDistrictSerializer(read_only=True)
-    block = MasterBlockSerializer(read_only=True)
-    gram_panchayat = MasterPanchayatSerializer(read_only=True)
-    shg = MasterShgSerializer(read_only=True)
-    nodal_clf = serializers.PrimaryKeyRelatedField(read_only=True)
-
-    district_id = serializers.IntegerField(write_only=True, required=True)
-    block_id = serializers.IntegerField(write_only=True, required=True)
-    panchayat_id = serializers.IntegerField(write_only=True, required=True)
-    shg_code = serializers.CharField(write_only=True, required=False, allow_null=True, allow_blank=True)
-    master_user_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    # Nested, read-only related objects (FKs on CRPEP)
+    district = MasterDistrictListSerializer(read_only=True)
+    block = MasterBlockListSerializer(read_only=True)
+    panchayat = MasterPanchayatListSerializer(read_only=True)
 
     class Meta:
         model = CRPEP
         fields = [
-            'id','name','mobile_number','category','subcategory','marks_obtained','TH_urid',
-            'district','block','gram_panchayat','shg','nodal_clf',
-            'district_id','block_id','panchayat_id','shg_code','master_user_id',
-            'created_at','updated_at','deleted_at'
+            'id',
+            'name',
+            'mobile_number',
+            'category',
+            'subcategory',
+            'marks_obtained',
+            'TH_urid',
+            'district_id',
+            'block_id',
+            'panchayat_id',
+            'lokos_shg_code',
+            'lokos_member_code',
+            'nodal_clf',
+            # nested read-only relations
+            'district',
+            'block',
+            'panchayat',
+            'created_at',
+            'updated_at',
+            'deleted_at',
         ]
-        read_only_fields = ['created_at','updated_at','deleted_at','TH_urid']
+        read_only_fields = [
+            'created_at',
+            'updated_at',
+            'deleted_at',
+            'TH_urid',
+            'district',
+            'block',
+            'panchayat',
+        ]
 
-    def create(self, validated_data):
-        district_id = validated_data.pop('district_id')
-        block_id = validated_data.pop('block_id')
-        panchayat_id = validated_data.pop('panchayat_id')
-        shg_code = validated_data.pop('shg_code', None)
-        master_user_id = validated_data.pop('master_user_id', None)
 
-        instance = CRPEP(
-            district_id=district_id,
-            block_id=block_id,
-            gram_panchayat_id=panchayat_id,
-            name=validated_data.get('name'),
-            mobile_number=validated_data.get('mobile_number'),
-            category=validated_data.get('category'),
-            subcategory=validated_data.get('subcategory'),
-            marks_obtained=validated_data.get('marks_obtained')
-        )
-        if shg_code:
-            instance.shg_id = shg_code
-        if master_user_id:
-            instance.master_user_id = master_user_id
-        instance.save()
-        return instance
+class BeneficiaryRecordedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BeneficiaryRecorded
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at', 'deleted_at', 'TH_urid']
 
-    def update(self, instance, validated_data):
-        for f in ['name','mobile_number','category','subcategory','marks_obtained']:
-            if f in validated_data:
-                setattr(instance, f, validated_data[f])
-        if 'district_id' in validated_data:
-            instance.district_id = validated_data['district_id']
-        if 'block_id' in validated_data:
-            instance.block_id = validated_data['block_id']
-        if 'panchayat_id' in validated_data:
-            instance.gram_panchayat_id = validated_data['panchayat_id']
-        if 'shg_code' in validated_data:
-            instance.shg_id = validated_data['shg_code']
-        if 'master_user_id' in validated_data:
-            instance.master_user_id = validated_data['master_user_id']
-        instance.save()
-        return instance
 
-class BeneficiaryEnterpriseSerializer(serializers.ModelSerializer):
-    beneficiary = MasterBeneficiarySerializer(read_only=True)
-    beneficiary_member_code = serializers.CharField(write_only=True, required=True)
+# ============= DETAIL SERIALIZERS =============
+
+class EnterpriseLoanDetailSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-loan-details/
+      - (Optionally) nested in ExistingEnterpriseSerializer for read operations.
+    """
+    class Meta:
+        model = EnterpriseLoanDetail
+        fields = '__all__'
+
+
+class EnterpriseSupportDetailSerializer(serializers.ModelSerializer):
+    """
+    NOTE:
+    - Class name kept for backward compatibility.
+    - Underlying model is now EnterpriseSubsidyDetail (epSakhi_exEpSubsidy).
+    - Used by:
+        * /enterprise-support-details/
+    """
+    class Meta:
+        model = EnterpriseSubsidyDetail
+        fields = '__all__'
+
+
+class EnterpriseTrainingReqSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-training-reqs/
+    """
+    class Meta:
+        model = EnterpriseTrainingReq
+        fields = '__all__'
+
+
+class EnterpriseMediaSerializer(serializers.ModelSerializer):
+    """
+    Used by:
+      - /enterprise-media/
+    """
+    class Meta:
+        model = EnterpriseMedia
+        fields = '__all__'
+
+
+# ============= EXISTING / NEW ENTERPRISE =============
+
+class ExistingEnterpriseSerializer(serializers.ModelSerializer):
+    """
+    ExistingEnterprise main form.
+
+    Nested write-only fields (OPTIONAL, kept for backward compatibility):
+      - loan_details: [ {...}, ... ]
+      - support_detail: { ... }
+      - training_reqs: [ {...}, ... ]
+      - media: { ... }
+
+    If these keys are omitted in payload, child tables are untouched.
+    """
+
+    loan_details = EnterpriseLoanDetailSerializer(
+        many=True, write_only=True, required=False
+    )
+    support_detail = EnterpriseSupportDetailSerializer(
+        write_only=True, required=False
+    )
+    training_reqs = EnterpriseTrainingReqSerializer(
+        many=True, write_only=True, required=False
+    )
+    media = EnterpriseMediaSerializer(
+        write_only=True, required=False
+    )
 
     class Meta:
-        model = BeneficiaryEnterprise
+        model = ExistingEnterprise
         fields = '__all__'
-        read_only_fields = ['created_at','updated_at','deleted_at']
+        read_only_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
 
+    @transaction.atomic
     def create(self, validated_data):
-        member_code = validated_data.pop('beneficiary_member_code')
-        validated_data['beneficiary_id'] = member_code
-        return super().create(validated_data)
+        loan_data = validated_data.pop('loan_details', None)
+        support_data = validated_data.pop('support_detail', None)
+        training_data = validated_data.pop('training_reqs', None)
+        media_data = validated_data.pop('media', None)
 
+        enterprise = super().create(validated_data)
+        enterprise_id = enterprise.TH_urid
+
+        # ----- Loan details -----
+        if loan_data:
+            for ld in loan_data:
+                EnterpriseLoanDetail.objects.create(
+                    enterprise_id=enterprise_id,
+                    **ld
+                )
+
+        # ----- Subsidy (support) detail -----
+        if support_data:
+            EnterpriseSubsidyDetail.objects.create(
+                enterprise_id=enterprise_id,
+                **support_data
+            )
+
+        # ----- Training requirements -----
+        if training_data:
+            for tr in training_data:
+                EnterpriseTrainingReq.objects.create(
+                    enterprise_id=enterprise_id,
+                    **tr
+                )
+
+        # ----- Media -----
+        if media_data:
+            EnterpriseMedia.objects.create(
+                enterprise_id=enterprise_id,
+                **media_data
+            )
+
+        return enterprise
+
+    @transaction.atomic
     def update(self, instance, validated_data):
-        if 'beneficiary_member_code' in validated_data:
-            instance.beneficiary_id = validated_data.pop('beneficiary_member_code')
-        return super().update(instance, validated_data)
+        loan_data = validated_data.pop('loan_details', None)
+        support_data = validated_data.pop('support_detail', None)
+        training_data = validated_data.pop('training_reqs', None)
+        media_data = validated_data.pop('media', None)
+
+        enterprise = super().update(instance, validated_data)
+        enterprise_id = enterprise.TH_urid
+
+        # ----- Loan details -----
+        if loan_data is not None:
+            EnterpriseLoanDetail.objects.filter(enterprise_id=enterprise_id).delete()
+            for ld in loan_data:
+                EnterpriseLoanDetail.objects.create(
+                    enterprise_id=enterprise_id,
+                    **ld
+                )
+
+        # ----- Subsidy (support) detail -----
+        if support_data is not None:
+            EnterpriseSubsidyDetail.objects.filter(enterprise_id=enterprise_id).delete()
+            if support_data:
+                EnterpriseSubsidyDetail.objects.create(
+                    enterprise_id=enterprise_id,
+                    **support_data
+                )
+
+        # ----- Training requirements -----
+        if training_data is not None:
+            EnterpriseTrainingReq.objects.filter(enterprise_id=enterprise_id).delete()
+            for tr in training_data:
+                EnterpriseTrainingReq.objects.create(
+                    enterprise_id=enterprise_id,
+                    **tr
+                )
+
+        # ----- Media -----
+        if media_data is not None:
+            EnterpriseMedia.objects.filter(enterprise_id=enterprise_id).delete()
+            if media_data:
+                EnterpriseMedia.objects.create(
+                    enterprise_id=enterprise_id,
+                    **media_data
+                )
+
+        return enterprise
+
+
+class NewEnterpriseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NewEnterprise
+        fields = '__all__'
+        read_only_fields = ['TH_urid', 'created_at', 'updated_at', 'deleted_at']
+
+
+# ============= NEW DETAIL MODELS =============
+
+class EnterpriseProductSerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_exEpProduct
+    """
+    class Meta:
+        model = EnterpriseProduct
+        fields = '__all__'
+
+
+class EnterpriseTypeCategorySerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_epType
+    """
+    class Meta:
+        model = EnterpriseTypeCategory
+        fields = '__all__'
+
+
+class NoEnterpriseFormSerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_noEpForm
+    """
+    class Meta:
+        model = NoEnterpriseForm
+        fields = '__all__'
+
+
+class NoEnterpriseWageSerializer(serializers.ModelSerializer):
+    """
+    CRUD for epSakhi_noEpWage
+    """
+    class Meta:
+        model = NoEnterpriseWage
+        fields = '__all__'

@@ -303,7 +303,6 @@ class MasterClfVoDetails(models.Model):
 class MasterShgList(models.Model):
     id = models.BigAutoField(primary_key=True)
     shg_code = models.CharField(unique=True, max_length=100)
-    code = models.CharField(max_length=100, blank=True, null=True)
     block = models.ForeignKey(MasterBlock, on_delete=models.DO_NOTHING, blank=True, null=True)
     district = models.ForeignKey(MasterDistrict, on_delete=models.DO_NOTHING, blank=True, null=True)
     panchayat = models.ForeignKey(MasterPanchayat, on_delete=models.DO_NOTHING, blank=True, null=True)
@@ -321,7 +320,6 @@ class MasterShgList(models.Model):
     created_date = models.DateTimeField(blank=True, null=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
     updated_date = models.DateTimeField(blank=True, null=True)
-    guid = models.CharField(max_length=100, blank=True, null=True)
     is_active = models.IntegerField(blank=True, null=True)
 
     class Meta:
@@ -330,6 +328,13 @@ class MasterShgList(models.Model):
 
     def __str__(self):
         return self.name or self.shg_code
+
+    @property
+    def code(self):
+        """
+        Backwards-compatible attribute so `obj.code` works even though DB column is `shg_code`.
+        """
+        return self.shg_code
 
 
 class MasterShgAddresses(models.Model):
@@ -533,3 +538,30 @@ class MasterVillagesUnderClf(models.Model):
     class Meta:
         managed = False
         db_table = 'master_villages_under_clf'
+
+
+# ---------- NEW: Geo user scope mapping table ----------
+class MasterGeoUserScope(models.Model):
+    """
+    Maps master_user.id to block_id and/or district_id.
+    - user_id: FK to master_user.id (but keep as BigIntegerField to keep read-only/mapping simple)
+    - block_id, district_id reference master_block.master_block_id and master_district.district_id respectively.
+    """
+    id = models.BigAutoField(primary_key=True)
+    user_id = models.BigIntegerField(db_index=True)
+    block_id = models.BigIntegerField(blank=True, null=True, db_index=True)
+    district_id = models.BigIntegerField(blank=True, null=True, db_index=True)
+    is_active = models.IntegerField(blank=True, null=True)
+    created_by = models.BigIntegerField(blank=True, null=True)
+    updated_by = models.BigIntegerField(blank=True, null=True)
+    deleted_by = models.BigIntegerField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+    deleted_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'master_geouserscope'
+
+    def __str__(self):
+        return f'GeoScope(user_id={self.user_id}, block={self.block_id}, district={self.district_id})'

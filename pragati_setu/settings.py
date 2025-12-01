@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -10,6 +11,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'DJANGO_SECRET_KEY'
 DEBUG = 'True'
 ALLOWED_HOSTS = ['*'] 
+APISETU_CLIENT_ID = os.getenv('APISETU_CLIENT_ID', '')
+APISETU_API_KEY = os.getenv('APISETU_API_KEY', '')
+APISETU_SHG_LIST_URL_TEMPLATE = os.getenv('APISETU_SHG_LIST_URL_TEMPLATE', '')
+APISETU_SHG_DETAIL_URL_TEMPLATE = os.getenv('APISETU_SHG_DETAIL_URL_TEMPLATE', '')
+SHG_CACHE_TTL = int(os.getenv('SHG_CACHE_TTL', '300'))
 
 # =========================
 # APPS
@@ -97,11 +103,22 @@ DATABASE_ROUTERS = ['core.dbrouters.MasterDBRouter']
 # =========================
 # CACHES
 # =========================
-# Default is DB cache - you can change to redis by swapping backend and installing django-redis
+# Use Redis (via django-redis) for default cache.
+# This powers:
+# - SHG / APISetu proxy caching
+# - cache_page decorators
+# - any other cache usage via django.core.cache.cache
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-        'LOCATION': 'django_cache_table',
+        'BACKEND': 'django_redis.cache.RedisCache',
+        # Password 'techno@2025' -> 'techno%402025' in URL
+        'LOCATION': 'redis://:techno%402025@127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 2,
+            'SOCKET_TIMEOUT': 2,
+        },
+        'KEY_PREFIX': 'pragati_setu',
     }
 }
 
@@ -161,6 +178,11 @@ SIMPLE_JWT = {
 
 # CORS
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-api-id',
+    'x-api-key',
+]
 
 # Upload limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
