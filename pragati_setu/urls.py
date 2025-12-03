@@ -8,7 +8,7 @@ from core.views_health import health
 
 schema_view = get_schema_view(
    openapi.Info(
-      title="epSakhi API",
+      title="Pragati Setu API",
       default_version='v1',
       description="API for epSakhi",
    ),
@@ -23,6 +23,7 @@ urlpatterns = [
     path('api/v1/lookups/', include(('core.api.urls', 'core_lookups'), namespace='core_lookups')),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('health', health),
+    path("api/v1/tms/", include("TMS.api.urls")),
 ]
 
 urlpatterns += [
