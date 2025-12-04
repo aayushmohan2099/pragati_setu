@@ -215,9 +215,9 @@ class MasterTrainerCertificateViewSet(BaseTMSModelViewSet):
     Certificate numbers can be auto-generated in model save().
     """
     swagger_schema = MastersSchema
-    queryset = tms_models.MasterTrainerCertificate.objects.select_related("trainer", "training_plan")
+    queryset = tms_models.MasterTrainerCertificate.objects.select_related("trainer", "training_plan", "theme")
     serializer_class = MasterTrainerCertificateSerializer
-    filterset_fields = ["trainer", "training_plan"]
+    filterset_fields = ["trainer", "training_plan", "theme"]
     search_fields = ["certificate_no"]
     ordering_fields = ["issued_on", "id"]
 

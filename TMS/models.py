@@ -230,13 +230,16 @@ class MasterTrainerCertificate(SoftDeleteMixin):
     training_plan = models.ForeignKey(
         TrainingPlan, on_delete=models.SET_NULL, null=True, blank=True
     )
+    theme = models.ForeignKey(
+        TrainingTheme, on_delete=models.SET_NULL, null=True, blank=True
+    )
     certificate_no = models.CharField(max_length=255, blank=True, null=True)
     issued_on = models.DateField(blank=True, null=True)
     certificate_file = models.FileField(
         upload_to='trainer_certificates/', blank=True, null=True,
         help_text="Upload certificate image/PDF (jpeg, png, pdf)."
     )
-
+    
     class Meta:
         db_table = 'tms_mastertrainercertificate'
         managed = True

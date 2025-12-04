@@ -11,8 +11,6 @@ django-filter==25.1
 django-redis==5.4.0
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
-drf-spectacular==0.29.0
-drf-spectacular-sidecar==2025.12.1
 drf-yasg==1.21.11
 et_xmlfile==2.0.0
 gunicorn==23.0.0
