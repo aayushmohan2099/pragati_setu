@@ -2,25 +2,7 @@
 
 from django.urls import path
 
-from .lookups import (
-    DistrictListView,
-    DistrictDetailView,
-    BlockListView,
-    BlockDetailView,
-    PanchayatListView,
-    PanchayatDetailView,
-    VillageListView,
-    VillageDetailView,
-    ShgListByBlockView,
-    ShgDetailView,
-    BeneficiaryListByShgView,
-    BeneficiaryDetailView,
-    ClfListView,
-    ClfDetailView,
-    MembersUnderClfView,
-    PanchayatsUnderClfView,
-    VillagesUnderClfView,
-)
+from .lookups import *
 from .upsrlm import (
     UpsrlmClfListView,
     UpsrlmClfDetailView,
@@ -189,4 +171,11 @@ urlpatterns = [
         UpsrlmVoMembersView.as_view(),
         name="upsrlm-vo-members",
     ),
+
+    # Geo-scope of a user / roles
+    path('user-geoscope/<int:user_id>/', UserGeoScopeView.as_view(), name='user-geoscope'),
+    path('roles/', MasterRolesView.as_view(), name='master-roles'),
+    path('states/', MasterStateView.as_view(), name='master-states'),
+    path('mandals/', MasterMandalView.as_view(), name='master-mandals'),
+
 ]
