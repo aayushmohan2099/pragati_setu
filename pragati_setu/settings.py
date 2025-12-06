@@ -195,7 +195,7 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 # In production store in DB/env; this is here for quick start
 # =========================
 ALLOWED_API_CREDENTIALS = {
-    "TH_EPS.BDOuser_test.co.in": 'wFR8IpSeNMawCF4RPLXit1POGuQAJTSmRexBBOwO'
+    "BDO_PMUser.TH_test.co.in": 'wFR8IpSeNMawCF4RPLXit1POGuQAJTSmRexBBOwO'
 }
 
 # Simple admin email
