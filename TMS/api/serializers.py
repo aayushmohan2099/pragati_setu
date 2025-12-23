@@ -381,43 +381,37 @@ class BatchParticipantCertificateDetailSerializer(SoftDeleteModelSerializer):
         fields = "__all__"
         depth = 1
 
+
+
+
+
+
+
+
+
 # ----------------------------
 # Reports
 # ----------------------------
 
 class MasterDistrictReportSerializer(SoftDeleteModelSerializer):
-    district_id = serializers.IntegerField(source='districtid')
-    district_name_en = serializers.CharField(source='districtnameen')
-    district_short_name_en = serializers.CharField(source='districtshortnameen')
-
     class Meta(SoftDeleteModelSerializer.Meta):
         model = core_models.MasterDistrict
         fields = ['district_id', 'district_name_en', 'district_short_name_en']
 
-class MasterBlockReportSerializer(SoftDeleteModelSerializer):
-    block_id = serializers.IntegerField(source='blockid')
-    block_name_en = serializers.CharField(source='blocknameen')
-    block_name_local = serializers.CharField(source='blocknamelocal')
-    is_aspirational = serializers.IntegerField(source='isaspirational')
 
+class MasterBlockReportSerializer(SoftDeleteModelSerializer):
     class Meta(SoftDeleteModelSerializer.Meta):
         model = core_models.MasterBlock
         fields = ['block_id', 'block_name_en', 'block_name_local', 'is_aspirational']
 
-class MasterPanchayatReportSerializer(SoftDeleteModelSerializer):
-    panchayat_id = serializers.IntegerField(source='panchayatid')
-    panchayat_name_en = serializers.CharField(source='panchayatnameen')
-    panchayat_name_local = serializers.CharField(source='panchayatnamelocal')
 
+class MasterPanchayatReportSerializer(SoftDeleteModelSerializer):
     class Meta(SoftDeleteModelSerializer.Meta):
         model = core_models.MasterPanchayat
         fields = ['panchayat_id', 'panchayat_name_en', 'panchayat_name_local']
 
-class MasterVillageReportSerializer(SoftDeleteModelSerializer):
-    village_id = serializers.IntegerField(source='villageid')
-    village_name_english = serializers.CharField(source='villagenameenglish')
-    village_name_local = serializers.CharField(source='villagenamelocal')
 
+class MasterVillageReportSerializer(SoftDeleteModelSerializer):
     class Meta(SoftDeleteModelSerializer.Meta):
         model = core_models.MasterVillage
         fields = ['village_id', 'village_name_english', 'village_name_local']
@@ -427,40 +421,46 @@ class MasterVillageReportSerializer(SoftDeleteModelSerializer):
 # ----------------------------
 
 class TrainingThemeReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    theme_name = serializers.CharField(source='themename')
-
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TrainingTheme
         fields = ['id', 'theme_name']
 
+
 class TrainingPlanReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    training_name = serializers.CharField(source='trainingname')
     theme = TrainingThemeReportSerializer(read_only=True)
 
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TrainingPlan
-        fields = ['id', 'training_name', 'theme', 'typeoftraining', 'leveloftraining', 'noofdays', 'approvalstatus']
-
+        fields = [
+            'id',
+            'training_name',
+            'theme',
+            'type_of_training',
+            'level_of_training',
+            'no_of_days',
+            'approval_status',
+        ]
 # ----------------------------
 # TrainingPartner (EXACT fields)
 # ----------------------------
 
 class TrainingPartnerReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TrainingPartner
-        fields = ['id', 'name', 'email', 'address', 'tpmregistrationno', 'mouform']
+        fields = [
+            'id',
+            'name',
+            'email',
+            'address',
+            'tpm_registration_no',
+            'mou_form',
+        ]
 
 # ----------------------------
 # TrainingPartnerCentre + Nested (EXACT model fields)
 # ----------------------------
 
 class TrainingPartnerCentreReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    serial_number = serializers.IntegerField(source='serialnumber')
     district = MasterDistrictReportSerializer(read_only=True)
     block = MasterBlockReportSerializer(read_only=True)
     panchayat = MasterPanchayatReportSerializer(read_only=True)
@@ -469,20 +469,33 @@ class TrainingPartnerCentreReportSerializer(SoftDeleteModelSerializer):
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TrainingPartnerCentre
         fields = [
-            'id', 'serial_number', 'district', 'block', 'panchayat', 'village',
-            'venuename', 'venueaddress', 'traininghallcount', 'traininghallcapacity',
-            'securityarrangements', 'toiletsbathrooms', 'powerwaterfacility',
-            'medicalkit', 'centretype', 'openspace', 'fieldvisitfacility',
-            'transportfacility', 'diningfacility', 'otherdetails'
+            'id',
+            'serial_number',
+            'district',
+            'block',
+            'panchayat',
+            'village',
+            'venue_name',
+            'venue_address',
+            'training_hall_count',
+            'training_hall_capacity',
+            'security_arrangements',
+            'toilets_bathrooms',
+            'power_water_facility',
+            'medical_kit',
+            'centre_type',
+            'open_space',
+            'field_visit_facility',
+            'transport_facility',
+            'dining_facility',
+            'other_details',
         ]
 
 class TrainingPartnerCentreRoomsReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    room_capacity = serializers.IntegerField(source='roomcapacity')
-
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TrainingPartnerCentreRooms
-        fields = ['id', 'roomname', 'room_capacity']
+        fields = ['id', 'room_name', 'room_capacity']
+
 
 class TrainingPartnerSubmissionReportSerializer(SoftDeleteModelSerializer):
     class Meta(SoftDeleteModelSerializer.Meta):
@@ -494,17 +507,27 @@ class TrainingPartnerSubmissionReportSerializer(SoftDeleteModelSerializer):
 # ----------------------------
 
 class MasterTrainerReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    empanel_district = MasterDistrictReportSerializer(read_only=True, source='empaneldistrict')
-    empanel_block = MasterBlockReportSerializer(read_only=True, source='empanelblock')
+    empanel_district = MasterDistrictReportSerializer(read_only=True)
+    empanel_block = MasterBlockReportSerializer(read_only=True)
 
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.MasterTrainer
         fields = [
-            'id', 'fullname', 'dateofbirth', 'mobileno', 'aadharno',
-            'empanel_district', 'empanel_block', 'socialcategory', 'gender',
-            'education', 'maritalstatus', 'parentorspousename', 'skills',
-            'successrate', 'designation'
+            'id',
+            'full_name',
+            'date_of_birth',
+            'mobile_no',
+            'aadhaar_no',
+            'empanel_district',
+            'empanel_block',
+            'social_category',
+            'gender',
+            'education',
+            'marital_status',
+            'parent_or_spouse_name',
+            'skills',
+            'success_rate',
+            'designation',
         ]
 
 # ----------------------------
@@ -512,10 +535,6 @@ class MasterTrainerReportSerializer(SoftDeleteModelSerializer):
 # ----------------------------
 
 class TRBeneficiaryReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    lokos_shg_code = serializers.CharField(source='lokosshgcode')
-    lokos_member_code = serializers.CharField(source='lokosmembercode')
-    member_name = serializers.CharField(source='membername')
     district = MasterDistrictReportSerializer(read_only=True)
     block = MasterBlockReportSerializer(read_only=True)
     panchayat = MasterPanchayatReportSerializer(read_only=True)
@@ -524,10 +543,28 @@ class TRBeneficiaryReportSerializer(SoftDeleteModelSerializer):
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TRBeneficiary
         fields = [
-            'id', 'lokos_shg_code', 'lokos_member_code', 'member_name', 'age',
-            'gender', 'designation', 'pldstatus', 'socialcategory', 'religion',
-            'mobile', 'email', 'education', 'address', 'district', 'block',
-            'panchayat', 'village', 'remarks', 'attended', 'isreplaced', 'registeredon'
+            'id',
+            'lokos_shg_code',
+            'lokos_member_code',
+            'member_name',
+            'age',
+            'gender',
+            'designation',
+            'pld_status',
+            'social_category',
+            'religion',
+            'mobile',
+            'email',
+            'education',
+            'address',
+            'district',
+            'block',
+            'panchayat',
+            'village',
+            'remarks',
+            'attended',
+            'is_replaced',
+            'registered_on',
         ]
 
 # ----------------------------
@@ -535,103 +572,132 @@ class TRBeneficiaryReportSerializer(SoftDeleteModelSerializer):
 # ----------------------------
 
 class BatchReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     centre = TrainingPartnerCentreReportSerializer(read_only=True)
-    rooms = TrainingPartnerCentreRoomsReportSerializer(source='centre__rooms', many=True, read_only=True)
-    centre_media = TrainingPartnerSubmissionReportSerializer(source='centre__submissions', many=True, read_only=True)
-    master_trainers = MasterTrainerReportSerializer(source='batchmastertrainer_set', many=True, read_only=True)
 
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.Batch
         fields = [
-            'id', 'centre', 'rooms', 'centre_media', 'master_trainers',
-            'batchtype', 'code', 'status', 'startdate', 'enddate', 'timeoftraining'
+            'id',
+            'centre',
+            'batch_type',
+            'code',
+            'status',
+            'start_date',
+            'end_date',
+            'time_of_training',
         ]
 
+
 class BatchScheduleReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchSchedule
-        fields = ['id', 'scheduledate', 'starttime', 'remarks']
+        fields = ['id', 'schedule_date', 'start_time', 'remarks', 'batch']
+
 
 class BatchMasterTrainerReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     master_trainer = MasterTrainerReportSerializer(read_only=True)
+
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchMasterTrainer
-        fields = ['id', 'master_trainer', 'participated', 'status', 'remarks']
+        fields = ['id', 'master_trainer', 'participated', 'status', 'remarks', 'batch']
+
 
 class BatchBeneficiaryReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     beneficiary = TRBeneficiaryReportSerializer(read_only=True)
+
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchBeneficiary
-        fields = ['id', 'beneficiary', 'registeredon', 'attended', 'isreplaced']
+        fields = ['id', 'beneficiary', 'registered_on', 'attended', 'is_replaced', 'batch']
+
 
 class BatchTrainerReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     trainer = MasterTrainerReportSerializer(read_only=True)
+
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchTrainer
-        fields = ['id', 'trainer', 'registeredon', 'attended', 'isreplaced']
+        fields = ['id', 'trainer', 'registered_on', 'attended', 'is_replaced', 'batch']
 
 class BatchEkycVerificationReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchEkycVerification
-        fields = ['id', 'participantid', 'participantrole', 'ekycstatus', 'ekycdocument', 'verifiedon', 'remarks']
+        fields = [
+            'id',
+            'participant_id',
+            'participant_role',
+            'ekyc_status',
+            'ekyc_document',
+            'verified_on',
+            'remarks',
+            'batch',
+        ]
+
 
 class BatchAttendanceReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    csv_upload = serializers.FileField(source='csvupload')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchAttendance
-        fields = ['id', 'date', 'csv_upload']
+        fields = ['id', 'date', 'csv_upload', 'batch']
+
 
 class ParticipantAttendanceReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.ParticipantAttendance
-        fields = ['id', 'participantid', 'participantname', 'participantrole', 'present']
+        fields = [
+            'id',
+            'participant_id',
+            'participant_name',
+            'participant_role',
+            'present',
+        ]
+
 
 class TPBatchCostBreakupReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TPBatchCostBreakup
-        fields = ['id', 'centrecost', 'hostelcost', 'foodingcost', 'dressescost', 'studymaterialcost', 'totalcost']
+        fields = [
+            'id',
+            'centre_cost',
+            'hostel_cost',
+            'fooding_cost',
+            'dresses_cost',
+            'study_material_cost',
+            'total_cost',
+            'batch',
+        ]
+
 
 class BatchCostReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    trainer_past_cost = serializers.DecimalField(source='trainerpartcost', max_digits=12, decimal_places=2)
-    tp_part_cost = serializers.DecimalField(source='tppartcost', max_digits=12, decimal_places=2)
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchCost
-        fields = ['id', 'trainer_past_cost', 'tp_part_cost']
+        fields = ['id', 'trainer_part_cost', 'tp_part_cost', 'batch']
+
 
 class BatchMediaReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.BatchMedia
-        fields = ['id', 'date', 'category', 'file', 'notes']
+        fields = ['id', 'date', 'category', 'file', 'notes', 'batch']
+
 
 class TRClosureReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TRClosure
-        fields = ['id', 'hra', 'tada']
-
+        fields = ['id', 'hra', 'ta_da']
+        
 # ----------------------------
 # FINAL TrainingRequestReportSerializer - NO prefetch_related needed
 # ----------------------------
 
 class TrainingRequestReportSerializer(SoftDeleteModelSerializer):
-    id = serializers.IntegerField(source='id')
-    training_plan = TrainingPlanReportSerializer(read_only=True, source='trainingplan')
+    id = serializers.IntegerField()
+
+    # --- Top-level ---
+    training_plan = TrainingPlanReportSerializer(
+        read_only=True
+    )
     partner = TrainingPartnerReportSerializer(read_only=True)
     district = MasterDistrictReportSerializer(read_only=True)
     block = MasterBlockReportSerializer(read_only=True)
-    
-    # Batch collections - using correct reverse relationships
+
+    # --- Deep Aggregations ---
     batch = serializers.SerializerMethodField()
     batch_schedule = serializers.SerializerMethodField()
     batch_master_trainer = serializers.SerializerMethodField()
@@ -643,69 +709,115 @@ class TrainingRequestReportSerializer(SoftDeleteModelSerializer):
     batch_cost_breakup = serializers.SerializerMethodField()
     batch_overall_cost = serializers.SerializerMethodField()
     batch_media = serializers.SerializerMethodField()
-    closure_docs = TRClosureReportSerializer(source='trclosure_set', many=True, read_only=True)
+    closure_docs = TRClosureReportSerializer(
+        source='TR_closure',
+        many=True,
+        read_only=True
+    )
 
     class Meta(SoftDeleteModelSerializer.Meta):
         model = tms_models.TrainingRequest
         fields = [
-            'id', 'training_plan', 'partner', 'trainingtype', 'level', 'status',
-            'district', 'block', 'batch', 'batch_schedule', 'batch_master_trainer',
-            'beneficiaries_in_batch', 'trainers_in_batch', 'batch_ekyc_participants',
-            'batch_attendance_csv', 'batch_participant_attendance', 'batch_cost_breakup',
-            'batch_overall_cost', 'batch_media', 'closure_docs'
+            'id',
+            'training_plan',
+            'partner',
+            'training_type',
+            'level',
+            'status',
+            'district',
+            'block',
+
+            'batch',
+            'batch_schedule',
+            'batch_master_trainer',
+            'beneficiaries_in_batch',
+            'trainers_in_batch',
+            'batch_ekyc_participants',
+            'batch_attendance_csv',
+            'batch_participant_attendance',
+            'batch_cost_breakup',
+            'batch_overall_cost',
+            'batch_media',
+            'closure_docs',
         ]
 
+    # ---------------------------
+    # ALL SerializerMethodFields
+    # ---------------------------
+
     def get_batch(self, obj):
-        return BatchReportSerializer(
-            tms_models.Batch.objects.filter(request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.Batch.objects.filter(
+            request=obj,
+            is_active=True
+        )
+        return BatchReportSerializer(qs, many=True, context=self.context).data
 
     def get_batch_schedule(self, obj):
-        return BatchScheduleReportSerializer(
-            tms_models.BatchSchedule.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchSchedule.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchScheduleReportSerializer(qs, many=True).data
 
     def get_batch_master_trainer(self, obj):
-        return BatchMasterTrainerReportSerializer(
-            tms_models.BatchMasterTrainer.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchMasterTrainer.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchMasterTrainerReportSerializer(qs, many=True).data
 
     def get_beneficiaries_in_batch(self, obj):
-        return BatchBeneficiaryReportSerializer(
-            tms_models.BatchBeneficiary.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchBeneficiary.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchBeneficiaryReportSerializer(qs, many=True).data
 
     def get_trainers_in_batch(self, obj):
-        return BatchTrainerReportSerializer(
-            tms_models.BatchTrainer.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchTrainer.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchTrainerReportSerializer(qs, many=True).data
 
     def get_batch_ekyc_participants(self, obj):
-        return BatchEkycVerificationReportSerializer(
-            tms_models.BatchEkycVerification.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchEkycVerification.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchEkycVerificationReportSerializer(qs, many=True).data
 
     def get_batch_attendance_csv(self, obj):
-        return BatchAttendanceReportSerializer(
-            tms_models.BatchAttendance.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchAttendance.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchAttendanceReportSerializer(qs, many=True).data
 
     def get_batch_participant_attendance(self, obj):
-        return ParticipantAttendanceReportSerializer(
-            tms_models.ParticipantAttendance.objects.filter(attendance__batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.ParticipantAttendance.objects.filter(
+            attendance__batch__request=obj,
+            is_active=True
+        )
+        return ParticipantAttendanceReportSerializer(qs, many=True).data
 
     def get_batch_cost_breakup(self, obj):
-        return TPBatchCostBreakupReportSerializer(
-            tms_models.TPBatchCostBreakup.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.TPBatchCostBreakup.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return TPBatchCostBreakupReportSerializer(qs, many=True).data
 
     def get_batch_overall_cost(self, obj):
-        return BatchCostReportSerializer(
-            tms_models.BatchCost.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchCost.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchCostReportSerializer(qs, many=True).data
 
     def get_batch_media(self, obj):
-        return BatchMediaReportSerializer(
-            tms_models.BatchMedia.objects.filter(batch__request=obj.id, is_active=True), many=True, context=self.context
-        ).data
+        qs = tms_models.BatchMedia.objects.filter(
+            batch__request=obj,
+            is_active=True
+        )
+        return BatchMediaReportSerializer(qs, many=True).data

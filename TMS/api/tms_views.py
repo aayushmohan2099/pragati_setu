@@ -2,6 +2,7 @@
 import os
 import re
 
+from django.shortcuts import get_object_or_404
 import docx
 from docx import Document
 from docx.shared import Inches, Pt
@@ -856,20 +857,29 @@ class TRClosureViewSet(BaseTMSModelViewSet):
     serializer_class = TRClosureSerializer
     filterset_fields = ["training"]
 
-class TrainingReportView(generics.RetrieveAPIView):
-    serializer_class = TrainingRequestReportSerializer
-    lookup_field = 'id'
+class TrainingReportView(APIView):
+    """
+    FULL Training Request Report API
 
-    def get_queryset(self):
-        # Only get the TrainingRequest - NO related objects
-        return tms_models.TrainingRequest.objects.filter(
-            id=self.kwargs['id'], 
-            isactive=True
+    URL:
+      /training-report/<training_request_id>/
+
+    Scope:
+      Returns a fully nested, read-only report of a TrainingRequest
+      including TrainingPlan, Partner, District, Block, Batches,
+      Centres, Trainers, Beneficiaries, Attendance, Costs, Media, Closure Docs.
+    """
+    def get(self, request, id):
+        training_request = get_object_or_404(
+            tms_models.TrainingRequest.objects.filter(
+                id=id,
+                is_active=True
+            )
         )
 
-    def get_object(self):
-        # Override to ensure only base object is fetched
-        queryset = self.filter_queryset(self.get_queryset())
-        obj = queryset.get(pk=self.kwargs['pk'])
-        self.check_object_permissions(self.request, obj)
-        return obj
+        serializer = TrainingRequestReportSerializer(
+            training_request,
+            context={"request": request}
+        )
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
