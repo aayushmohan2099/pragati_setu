@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from core import models
+from django.utils import timezone
 
 # -------------------------
 # Lightweight list serializers (return FK ids only)
@@ -254,8 +255,32 @@ class MasterRolesSerializer(serializers.ModelSerializer):
 
 
 class MasterUserSerializer(serializers.ModelSerializer):
-    role_id = serializers.IntegerField(read_only=True)
+    role_id = serializers.IntegerField(required=False, allow_null=True)
 
     class Meta:
         model = models.MasterUser
         fields = '__all__'
+        read_only_fields = (
+            'id',
+            'created_at',
+            'updated_at',
+            'deleted_at',
+        )
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+
+        validated_data['created_at'] = timezone.now()
+        if request and request.user and hasattr(request.user, 'id'):
+            validated_data['created_by_id'] = request.user.id
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+
+        validated_data['updated_at'] = timezone.now()
+        if request and request.user and hasattr(request.user, 'id'):
+            validated_data['updated_by_id'] = request.user.id
+
+        return super().update(instance, validated_data)

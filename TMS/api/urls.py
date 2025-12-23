@@ -100,6 +100,11 @@ router.register(
     basename="tms-batch",
 )
 router.register(
+    r"batch-schedules",
+    tms_views.BatchScheduleViewSet,
+    basename="tms-batch-schedule",
+)
+router.register(
     r"batch-master-trainers",
     tms_views.BatchMasterTrainerViewSet,
     basename="tms-batch-master-trainer",
@@ -166,6 +171,12 @@ urlpatterns = [
     # CRUD / core APIs
     path("", include(router.urls)),
 
+    # TP CP to Centre Details with list API
+    path(
+        "tpcp_to_centre/details/",
+        tms_views.TPCPCentreDetailViewSet.as_view({'get': 'list'}),
+    ),
+
     # BMMU
     path("bmmu/dashboard/", dashboard_views.BmmuDashboardAPIView.as_view()),
     path("bmmu/trainings-list/", dashboard_views.BmmuTrainingsListAPIView.as_view()),
@@ -191,4 +202,5 @@ urlpatterns = [
         "dmmu/batches/<int:batch_id>/attendance-by-date/",
         dashboard_views.DmmuBatchAttendanceDateAPIView.as_view(),
     ),
+    path('training-report/<int:id>/', tms_views.TrainingReportView.as_view(), name='training-report'),
 ]

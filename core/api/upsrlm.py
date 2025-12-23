@@ -50,6 +50,7 @@ def get_apisetu_headers() -> Dict[str, str]:
     return {
         "X-APISETU-CLIENTID": client_id,
         "X-APISETU-APIKEY": api_key,
+        "scope": "lgd",
         "accept": "application/json",
     }
 
@@ -301,7 +302,7 @@ class BaseUpsrlmView(APIView):
         url = f"{UPSRLM_APISETU_BASE.rstrip('/')}/{path.lstrip('/')}"
         headers = get_apisetu_headers()
         try:
-            resp = requests.get(url, headers=headers, params=params or {}, timeout=20)
+            resp = requests.get(url, headers=headers, params=params or {}, timeout=30)
         except requests.RequestException as exc:
             logger.exception("Error calling UPSRLM API (%s)", url)
             raise RuntimeError("Error calling UPSRLM APISetu gateway") from exc
@@ -617,6 +618,7 @@ class UpsrlmClfPanchayatListView(BaseUpsrlmView):
     FILTERS = {
         "panchayat_name": "panchayat_name",
         "panchayat_id": "panchayat_id",
+        "lgd_gp": "lgd_gp",
         "panchayat_code": "panchayat_code",
     }
 

@@ -156,8 +156,26 @@ class DistrictDetailView(APIView):
     def get(self, request, district_id=None):
         if not district_id:
             return Response({'detail': 'district_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        # detail view selects related models fully
-        district = get_object_or_404(MasterDistrict.objects.select_related('state', 'mandal'), district_id=district_id)
+
+        district = get_object_or_404(
+            MasterDistrict.objects.select_related('state', 'mandal'),
+            district_id=district_id
+        )
+
+        # ---------------------------------------------
+        #  SURGICAL ADDITION: fields= support for detail
+        # ---------------------------------------------
+        fields = request.GET.get("fields")
+        if fields:
+            allowed = parse_csv_param(fields)
+            serializer = MasterDistrictDetailSerializer(district)
+            data = serializer.data
+
+            # return only selected fields
+            filtered = {k: v for k, v in data.items() if k in allowed}
+            return Response(filtered)
+
+        # default behaviour (unchanged)
         serializer = MasterDistrictDetailSerializer(district)
         return Response(serializer.data)
 
@@ -199,8 +217,26 @@ class BlockDetailView(APIView):
     def get(self, request, block_id=None):
         if not block_id:
             return Response({'detail': 'block_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        # detail uses select_related to include nested objects
-        block = get_object_or_404(MasterBlock.objects.select_related('state', 'district'), block_id=block_id)
+
+        block = get_object_or_404(
+            MasterBlock.objects.select_related('state', 'district'),
+            block_id=block_id
+        )
+
+        # ---------------------------------------------
+        #   SURGICAL ADDITION: fields= support
+        # ---------------------------------------------
+        fields = request.GET.get("fields")
+        if fields:
+            allowed = parse_csv_param(fields)
+            serializer = MasterBlockDetailSerializer(block)
+            data = serializer.data
+
+            # return ONLY requested fields
+            filtered = {k: v for k, v in data.items() if k in allowed}
+            return Response(filtered)
+
+        # default full-detail response
         serializer = MasterBlockDetailSerializer(block)
         return Response(serializer.data)
 
@@ -241,7 +277,26 @@ class PanchayatDetailView(APIView):
     def get(self, request, panchayat_id=None):
         if not panchayat_id:
             return Response({'detail': 'panchayat_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        p = get_object_or_404(MasterPanchayat.objects.select_related('state', 'district', 'block'), panchayat_id=panchayat_id)
+
+        p = get_object_or_404(
+            MasterPanchayat.objects.select_related('state', 'district', 'block'),
+            panchayat_id=panchayat_id
+        )
+
+        # ---------------------------------------------
+        #   SURGICAL ADDITION: fields= support
+        # ---------------------------------------------
+        fields = request.GET.get("fields")
+        if fields:
+            allowed = parse_csv_param(fields)
+            serializer = MasterPanchayatDetailSerializer(p)
+            data = serializer.data
+
+            # return only allowed keys
+            filtered = {k: v for k, v in data.items() if k in allowed}
+            return Response(filtered)
+
+        # default (full) response
         serializer = MasterPanchayatDetailSerializer(p)
         return Response(serializer.data)
 
@@ -282,7 +337,26 @@ class VillageDetailView(APIView):
     def get(self, request, village_id=None):
         if not village_id:
             return Response({'detail': 'village_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        v = get_object_or_404(MasterVillage.objects.select_related('state', 'district', 'block', 'panchayat'), village_id=village_id)
+
+        v = get_object_or_404(
+            MasterVillage.objects.select_related('state', 'district', 'block', 'panchayat'),
+            village_id=village_id
+        )
+
+        # ---------------------------------------------
+        #   SURGICAL ADDITION: fields= support
+        # ---------------------------------------------
+        fields = request.GET.get("fields")
+        if fields:
+            allowed = parse_csv_param(fields)
+            serializer = MasterVillageDetailSerializer(v)
+            data = serializer.data
+
+            # return only requested fields
+            filtered = {k: v for k, v in data.items() if k in allowed}
+            return Response(filtered)
+
+        # default full serializer response
         serializer = MasterVillageDetailSerializer(v)
         return Response(serializer.data)
 
@@ -650,28 +724,77 @@ class MasterRolesView(generics.ListAPIView):
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-
+# Master User List View
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MasterUserListView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
     serializer_class = MasterUserSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['username', 'recovery_email', 'recovery_mobile']
+    SEARCH_FIELDS = ['username', 'recovery_email', 'recovery_mobile', 'id']
     ALLOWED_FILTERS = {'role_id': 'role_id', 'is_active': 'is_active'}
     ALLOWED_ORDERING = {'id', 'username', 'created_at'}
     ALLOWED_GROUP_BY = {'role_id', 'is_active'}
 
     def get_queryset(self):
         qs = MasterUser.objects.all().select_related('role').order_by('username').only(
-            'id', 'username', 'recovery_email', 'recovery_mobile', 'role_id', 'is_active', 'created_at', 'updated_at'
+            'id', 'username', 'recovery_email', 'recovery_mobile',
+            'role_id', 'is_active', 'created_at', 'updated_at'
         )
         qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
         qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
+    # -------------------------------
+    #  SURGICAL FIELD EXTRACTION ADDITION
+    # -------------------------------
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
 
+        # group_by support
+        grouped = apply_group_by(qs, request, self.ALLOWED_GROUP_BY, id_field='id')
+        if grouped:
+            return Response(grouped)
+
+        # fields= support (like Beneficiary API)
+        fields = request.GET.get('fields')
+        if fields:
+            qs = qs.values(*parse_csv_param(fields))
+            page = self.paginate_queryset(qs)
+            return self.get_paginated_response(
+                list(page) if page is not None else list(qs)
+            )
+
+        return super().list(request, *args, **kwargs)
+
+# CRUD for Master User 
+class MasterUserCreateView(generics.CreateAPIView):
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = MasterUserSerializer
+    queryset = MasterUser.objects.all()    
+    
+class MasterUserDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = MasterUserSerializer
+    queryset = MasterUser.objects.select_related('role')
+
+    lookup_url_kwarg = 'user_id'
+
+    def delete(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        instance.deleted_at = timezone.now()
+        if request.user and hasattr(request.user, 'id'):
+            instance.deleted_by_id = request.user.id
+
+        instance.save(update_fields=['deleted_at', 'deleted_by'])
+
+        return Response(
+            {"detail": "User deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )   
+    
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class MasterStateView(generics.ListAPIView):
     permission_classes = (permissions.AllowAny,)
@@ -711,7 +834,7 @@ class MasterMandalView(generics.ListAPIView):
 
 
 # ----------------------------
-# User GeoScope view (unchanged)
+# User GeoScope view
 # ----------------------------
 @method_decorator(cache_page(CACHE_TTL), name='get')
 class UserGeoScopeView(APIView):
@@ -746,3 +869,46 @@ class UserGeoScopeView(APIView):
             response['blocks'] = sorted(list(blocks))
             response['districts'] = sorted(list(districts))
         return Response(response)
+
+class UserGeoScopeLookupView(APIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def get(self, request):
+        block_id = request.GET.get("block_id")
+        district_id = request.GET.get("district_id")
+
+        if block_id is None and district_id is None:
+            return Response(
+                {'detail': 'Provide block_id or district_id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        qs = MasterGeoUserScope.objects.filter(is_active=1)
+
+        # ------------------------
+        # BLOCK FILTER (supports "null")
+        # ------------------------
+        if block_id is not None:
+            if block_id.lower() == "null":
+                qs = qs.filter(block_id__isnull=True)
+            elif block_id != "":
+                qs = qs.filter(block_id=block_id)
+
+        # ------------------------
+        # DISTRICT FILTER (supports "null")
+        # ------------------------
+        if district_id is not None:
+            if district_id.lower() == "null":
+                qs = qs.filter(district_id__isnull=True)
+            elif district_id != "":
+                qs = qs.filter(district_id=district_id)
+
+        # Extract unique list of user_ids
+        user_ids = list(qs.values_list("user_id", flat=True).distinct())
+
+        return Response({
+            "block_id": block_id,
+            "district_id": district_id,
+            "users_exist": bool(user_ids),
+            "user_ids": user_ids
+        })

@@ -1,59 +1,43 @@
 # TMS/api/tms_views.py
+import os
+import re
+
+import docx
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
 
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
+import tempfile
+import zipfile
+from io import BytesIO
 
 from django.db import transaction
 from django.db.models import Q
+from django.db.models import QuerySet
 from django.utils import timezone
+
+from rest_framework.views import APIView
+from rest_framework import status,generics
+from django.http import HttpResponse
+from django.conf import settings
+from datetime import datetime
+from rest_framework import serializers
 
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
-
+from rest_framework.pagination import PageNumberPagination
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg.inspectors import SwaggerAutoSchema
+from drf_yasg import openapi
 
 from core.models import MasterUser
 from TMS import models as tms_models
-from TMS.api.serializers import (
-    TrainingThemeSerializer,
-    TrainingPlanSerializer,
-    TrainingRequestSerializer,
-    TrainingRequestDetailSerializer,
-    TRBeneficiarySerializer,
-    TRBeneficiaryDetailSerializer,
-    TRTrainerSerializer,
-    TRTrainerDetailSerializer,
-    TrainingPartnerSerializer,
-    TrainingPartnerBankSerializer,
-    TrainingPartnerCPSerializer,
-    TrainingPartnerCentreSerializer,
-    TrainingPartnerCentreDetailSerializer,
-    TrainingPartnerCentreRoomsSerializer,
-    TPCPToCentreSerializer,
-    TrainingPartnerSubmissionSerializer,
-    TrainingPartnerTargetsSerializer,
-    TRPUserScopeSerializer,
-    MasterTrainerSerializer,
-    MasterTrainerDetailSerializer,
-    MasterTrainerCertificateSerializer,
-    BatchSerializer,
-    BatchDetailSerializer,
-    BatchMasterTrainerSerializer,
-    BatchBeneficiarySerializer,
-    BatchTrainerSerializer,
-    BatchEkycVerificationSerializer,
-    BatchAttendanceSerializer,
-    ParticipantAttendanceSerializer,
-    TPBatchCostBreakupSerializer,
-    BatchParticipantCertificateSerializer,
-    BatchCostSerializer,
-    BatchMediaSerializer,
-    BatchClosureRequestSerializer,
-    TRClosureSerializer,
-)
+from TMS.api.serializers import *
 
 
 # -------------------------------------------------------------------
@@ -72,6 +56,13 @@ def _role_name(user: MasterUser) -> str:
         pass
     return ""
 
+# --------------------------
+# Helper utilities
+# --------------------------
+def parse_csv_param(val):
+    if not val:
+        return []
+    return [p.strip() for p in val.split(',') if p.strip()]
 
 # -------------------------------------------------------------------
 # Swagger tagging helpers (drf_yasg)
@@ -106,6 +97,9 @@ class ClosureSchema(SwaggerAutoSchema):
     def get_tags(self, operation_keys=None):
         return ["TMS – Batch Closure & Certificates"]
 
+class ReportsSchema(SwaggerAutoSchema):
+    def get_tags(self, operation_keys=None):
+        return ["TMS – Reports"]
 
 # -------------------------------------------------------------------
 # Base ViewSet with soft-delete support
@@ -170,6 +164,7 @@ class TrainingPlanViewSet(BaseTMSModelViewSet):
     queryset = tms_models.TrainingPlan.objects.select_related("theme")
     serializer_class = TrainingPlanSerializer
     filterset_fields = [
+        "id",
         "theme",
         "type_of_training",
         "level_of_training",
@@ -178,7 +173,31 @@ class TrainingPlanViewSet(BaseTMSModelViewSet):
     search_fields = ["training_name"]
     ordering_fields = ["training_name", "id"]
 
+    # -----------------------------------
+    #   SURGICAL ADDITION: fields= support
+    # -----------------------------------
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
 
+        # fields=id,training_name,type_of_training
+        fields = request.GET.get("fields")
+        if fields:
+            qs = qs.values(*parse_csv_param(fields))
+            page = self.paginate_queryset(qs)
+            return self.get_paginated_response(
+                list(page) if page is not None else list(qs)
+            )
+
+        return super().list(request, *args, **kwargs)
+
+# custom paginator
+class TenPerPagePagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = "page_size"  # optional: allow clients to change page size
+    max_page_size = 100  # optional safeguard
+
+
+    
 class MasterTrainerViewSet(BaseTMSModelViewSet):
     """
     CRUD for MasterTrainer (BRP/DRP/SRP).
@@ -193,7 +212,8 @@ class MasterTrainerViewSet(BaseTMSModelViewSet):
         "gender",
         "social_category",
     ]
-    search_fields = ["full_name", "mobile_no", "aadhaar_no"]
+    search_fields = ["full_name", "mobile_no", "id"]
+    pagination_class = TenPerPagePagination    
 
     @swagger_auto_schema(
         operation_summary="Retrieve master trainer with certificates",
@@ -233,9 +253,26 @@ class TrainingPartnerViewSet(BaseTMSModelViewSet):
     swagger_schema = PartnersSchema
     queryset = tms_models.TrainingPartner.objects.all()
     serializer_class = TrainingPartnerSerializer
-    filterset_fields = ["name"]
-    search_fields = ["name", "tpm_registration_no"]
+    filterset_fields = ["name", "id"]
+    search_fields = ["name", "tpm_registration_no", "master_user__id"]
     ordering_fields = ["name", "id"]
+
+    # -------------------------------
+    #   SURGICAL ADDITION: fields= support
+    # -------------------------------
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+
+        # fields extraction
+        fields = request.GET.get("fields")
+        if fields:
+            qs = qs.values(*parse_csv_param(fields))
+            page = self.paginate_queryset(qs)
+            return self.get_paginated_response(
+                list(page) if page is not None else list(qs)
+            )
+
+        return super().list(request, *args, **kwargs)
 
     @swagger_auto_schema(
         operation_summary="Get partner with centres & banks",
@@ -249,6 +286,7 @@ class TrainingPartnerViewSet(BaseTMSModelViewSet):
         partner = self.get_object()
         serializer = TrainingPartnerSerializer(partner, context={"request": request})
         return Response(serializer.data)
+
 
 
 class TrainingPartnerBankViewSet(BaseTMSModelViewSet):
@@ -268,7 +306,7 @@ class TrainingPartnerCPViewSet(BaseTMSModelViewSet):
     swagger_schema = PartnersSchema
     queryset = tms_models.TrainingPartnerCP.objects.select_related("partner", "master_user")
     serializer_class = TrainingPartnerCPSerializer
-    filterset_fields = ["partner"]
+    filterset_fields = ["partner", "master_user"]
     search_fields = ["name", "mobile_number", "email"]
 
 
@@ -324,8 +362,17 @@ class TPCPToCentreViewSet(BaseTMSModelViewSet):
     """
     swagger_schema = PartnersSchema
     queryset = tms_models.TPCPToCentre.objects.select_related("contact_person", "allocated_centre")
-    serializer_class = TPCPToCentreSerializer
+    serializer_class = TPCPToCentreSerializer   
     filterset_fields = ["contact_person", "allocated_centre"]
+    
+class TPCPCentreDetailViewSet(BaseTMSModelViewSet):
+    """
+    ViewSet to get details of TrainingPartnerCP along with allocated centres.
+    """
+    swagger_schema = PartnersSchema
+    queryset = tms_models.TPCPToCentre.objects.select_related("contact_person", "allocated_centre")
+    serializer_class = TPCPToCentreDetailSerializer
+    filterset_fields = ["contact_person", "allocated_centre"]    
 
 
 class TrainingPartnerSubmissionViewSet(BaseTMSModelViewSet):
@@ -381,7 +428,7 @@ class TrainingRequestViewSet(BaseTMSModelViewSet):
         .prefetch_related("beneficiary_registrations", "trainer_registrations")
     )
     serializer_class = TrainingRequestSerializer
-    filterset_fields = ["status", "level", "training_type", "training_plan", "partner"]
+    filterset_fields = ["status", "level", "training_type", "training_plan", "partner", "created_by", "block", "district"]
     search_fields = ["id"]
 
     @swagger_auto_schema(
@@ -508,7 +555,7 @@ class TRTrainerViewSet(BaseTMSModelViewSet):
     swagger_schema = RequestsSchema
     queryset = tms_models.TRTrainer.objects.select_related("training", "trainer")
     serializer_class = TRTrainerSerializer
-    filterset_fields = ["training", "trainer"]
+    filterset_fields = ["training", "trainer" , "district" , "block"]
 
     @swagger_auto_schema(
         operation_summary="Retrieve trainer registration with nested training & trainer",
@@ -632,6 +679,14 @@ class BatchViewSet(BaseTMSModelViewSet):
         batch.save(update_fields=["status"])
         return Response(BatchSerializer(batch, context={"request": request}).data)
 
+class BatchScheduleViewSet(BaseTMSModelViewSet):
+    """
+    Batch Schedule – per batch per day schedule details.
+    """
+    swagger_schema = BatchesSchema
+    queryset = tms_models.BatchSchedule.objects.select_related("batch")
+    serializer_class = BatchScheduleSerializer
+    filterset_fields = ["batch", "schedule_date"]
 
 class BatchMasterTrainerViewSet(BaseTMSModelViewSet):
     """
@@ -743,9 +798,14 @@ class BatchCostViewSet(BaseTMSModelViewSet):
     Aggregated trainer + TP parts + detailed cost (TPBatchCostBreakup).
     """
     swagger_schema = ClosureSchema
-    queryset = tms_models.BatchCost.objects.select_related("batch", "batch_expenses")
+    queryset = tms_models.BatchCost.objects.select_related("training", "batch", "batch_expenses")
+    @action(detail=True, methods=["get"], url_path="detail")
+    def detail_view(self, request, pk=None):
+        batch = self.get_object()
+        serializer = BatchCostDetailSerializer(batch, context={"request": request})
+        return Response(serializer.data)    
     serializer_class = BatchCostSerializer
-    filterset_fields = ["batch"]
+    filterset_fields = ["batch", "training"]
 
 
 class BatchMediaViewSet(BaseTMSModelViewSet):
@@ -755,7 +815,7 @@ class BatchMediaViewSet(BaseTMSModelViewSet):
     swagger_schema = ClosureSchema
     queryset = tms_models.BatchMedia.objects.select_related("batch")
     serializer_class = BatchMediaSerializer
-    filterset_fields = ["batch", "category"]
+    filterset_fields = ["batch", "category", "date"]
 
 
 class BatchClosureRequestViewSet(BaseTMSModelViewSet):
@@ -764,7 +824,7 @@ class BatchClosureRequestViewSet(BaseTMSModelViewSet):
     Later aggregated into Training Request closure by TP → DMMU.
     """
     swagger_schema = ClosureSchema
-    queryset = tms_models.BatchClosureRequest.objects.select_related("batch", "batch_costing", "batch_pictures")
+    queryset = tms_models.BatchClosureRequest.objects.select_related("batch", "batch_costing")
     serializer_class = BatchClosureRequestSerializer
     filterset_fields = ["batch", "certificates_issued"]
 
@@ -792,6 +852,24 @@ class TRClosureViewSet(BaseTMSModelViewSet):
     Links all batches in a training request with HRA / TA-DA docs.
     """
     swagger_schema = ClosureSchema
-    queryset = tms_models.TRClosure.objects.select_related("batch")
+    queryset = tms_models.TRClosure.objects.select_related("training")
     serializer_class = TRClosureSerializer
-    filterset_fields = ["batch"]
+    filterset_fields = ["training"]
+
+class TrainingReportView(generics.RetrieveAPIView):
+    serializer_class = TrainingRequestReportSerializer
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        # Only get the TrainingRequest - NO related objects
+        return tms_models.TrainingRequest.objects.filter(
+            id=self.kwargs['id'], 
+            isactive=True
+        )
+
+    def get_object(self):
+        # Override to ensure only base object is fetched
+        queryset = self.filter_queryset(self.get_queryset())
+        obj = queryset.get(pk=self.kwargs['pk'])
+        self.check_object_permissions(self.request, obj)
+        return obj

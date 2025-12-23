@@ -28,7 +28,7 @@ class MasterRoles(models.Model):
 
 class MasterUser(models.Model):
     """
-    master_user table representation. Meta.managed=False so it maps to existing DB table.
+    master_user table representation. 
     Note: role modeled as FK to MasterRoles to reflect your schema.
     """
     id = models.BigAutoField(primary_key=True)
@@ -37,7 +37,7 @@ class MasterUser(models.Model):
     recovery_email = models.CharField(max_length=255, blank=True, null=True)
     recovery_mobile = models.CharField(max_length=20, blank=True, null=True)
     pass_attempt_no = models.IntegerField(blank=True, null=True)
-    role = models.ForeignKey(MasterRoles, models.DO_NOTHING, blank=True, null=True)
+    role = models.ForeignKey(MasterRoles,models.DO_NOTHING,db_column='role_id',blank=True,null=True)
     is_active = models.IntegerField(blank=True, null=True)
     last_active_on = models.DateTimeField(blank=True, null=True)
     is_suspended = models.IntegerField(blank=True, null=True)
@@ -55,7 +55,7 @@ class MasterUser(models.Model):
     deleted_by = models.ForeignKey('self', models.DO_NOTHING, db_column='deleted_by', related_name='masteruser_deleted_by_set', blank=True, null=True)
 
     class Meta:
-        managed = False
+        managed = True
         db_table = 'master_user'
 
     def __str__(self):

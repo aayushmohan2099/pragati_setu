@@ -584,14 +584,6 @@ class TrainingRequest(SoftDeleteMixin):
     partner = models.ForeignKey(
         TrainingPartner, on_delete=models.SET_NULL, null=True, blank=True
     )
-
-    trainer = models.ManyToManyField(
-        MasterTrainer,
-        blank=True,
-        related_name='trainers_for_training',
-        through='TRTrainer',
-    )
-
     TRAINING_TYPE_CHOICES = [
         ('BENEFICIARY', 'Beneficiary'),
         ('TRAINER', 'Master Trainer'),
@@ -613,11 +605,19 @@ class TrainingRequest(SoftDeleteMixin):
         ('BATCHING', 'Batching Phase'),
         ('PENDING', 'Pending Approval'),
         ('ONGOING', 'Ongoing'),
+        ('REVIEW', 'Review Phase'),
         ('COMPLETED', 'Completed'),
         ('REJECTED', 'Rejected'),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='BATCHING')
     rejection_reason = models.CharField(max_length=500, blank=True, null=True)
+
+    district = models.ForeignKey(
+        MasterDistrict, on_delete=models.DO_NOTHING, blank=True, null=True
+    )
+    block = models.ForeignKey(
+        MasterBlock, on_delete=models.DO_NOTHING, blank=True, null=True
+    )    
 
     class Meta:
         db_table = 'tms_trainingrequest'
@@ -709,6 +709,20 @@ class TRTrainer(SoftDeleteMixin):
         MasterTrainer, on_delete=models.SET_NULL, null=True, blank=True
     )
 
+    full_name = models.CharField(max_length=200, blank=True, null=True)
+
+    mobile_no = models.CharField(
+        "Mobile No.", max_length=20, blank=True, null=True, db_index=True
+    )
+    aadhaar_no = models.CharField("Aadhaar No", max_length=20, blank=True, null=True)
+
+    district = models.ForeignKey(
+        MasterDistrict, on_delete=models.DO_NOTHING, blank=True, null=True
+    )
+    block = models.ForeignKey(
+        MasterBlock, on_delete=models.DO_NOTHING, blank=True, null=True
+    )
+
     remarks = models.TextField(blank=True, null=True)
     attended = models.BooleanField(default=False)
     is_replaced = models.BooleanField(default=False)
@@ -786,6 +800,8 @@ class Batch(SoftDeleteMixin):
     start_date = models.DateField(blank=True, null=True)
     end_date = models.DateField(blank=True, null=True)
 
+    time_of_training = models.CharField(max_length=255, blank=True, null=True)
+
     class Meta:
         db_table = 'tms_batch'
         managed = True
@@ -799,6 +815,26 @@ class Batch(SoftDeleteMixin):
 
     def __str__(self):
         return self.code or str(self.id)
+    
+class BatchSchedule(SoftDeleteMixin):
+    id = models.BigAutoField(primary_key=True)
+    batch = models.ForeignKey(
+        Batch, on_delete=models.CASCADE, related_name='schedules'
+    )
+    schedule_date = models.DateField()
+    start_time = models.TimeField(blank=True, null=True)
+    remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'tms_batchschedule'
+        managed = True
+        indexes = [
+            models.Index(fields=['batch']),
+            models.Index(fields=['schedule_date']),
+        ]
+
+    def __str__(self):
+        return f"BatchSchedule({self.batch_id}) on {self.schedule_date}"    
 
 # ----------------------------
 # Participants attached to a batch
@@ -905,7 +941,7 @@ class BatchEkycVerification(SoftDeleteMixin):
     participant_id = models.CharField(max_length=255)
     participant_role = models.CharField(
         max_length=20,
-        choices=[('trainer', 'Trainer'), ('beneficiary', 'Beneficiary')]
+        choices=[('trainer', 'Trainer'), ('trainee', 'Trainee')]
     )
     ekyc_status = models.CharField(
         max_length=20,
@@ -951,7 +987,7 @@ class ParticipantAttendance(SoftDeleteMixin):
     participant_id = models.CharField(max_length=128)
     participant_name = models.CharField(max_length=255, blank=True, null=True)
     participant_role = models.CharField(
-        max_length=50, choices=[('trainer', 'Trainer'), ('beneficiary', 'Beneficiary')]
+        max_length=50, choices=[('trainer', 'Trainer'), ('trainee', 'Trainee')]
     )
     present = models.BooleanField(default=False)
 
@@ -981,7 +1017,7 @@ class TPBatchCostBreakup(SoftDeleteMixin):
     fooding_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     dresses_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     study_material_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    misc_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
         db_table = 'tms_tpbatchcostbreakup'
@@ -1079,6 +1115,11 @@ class BatchParticipantCertificate(SoftDeleteMixin):
 
 class BatchCost(SoftDeleteMixin):
     id = models.BigAutoField(primary_key=True)
+    training = models.ForeignKey(
+        TrainingRequest, on_delete=models.SET_NULL, null=True,
+        related_name='TR_of_batch'
+    )
+    
     batch = models.ForeignKey(
         Batch, on_delete=models.SET_NULL, null=True,
         related_name='batch_costing'
@@ -1108,6 +1149,8 @@ class BatchMedia(SoftDeleteMixin):
         related_name='batch_pictures'
     )
 
+    date = models.CharField(max_length=100, blank=True, null=True)
+    
     CATEGORY_CHOICES = [
         ('FOODING', 'Fooding'),
         ('CLASS', 'Classroom'),
@@ -1141,14 +1184,9 @@ class BatchClosureRequest(SoftDeleteMixin):
         related_name='batch_closing'
     )
     batch_costing = models.ForeignKey(
-        BatchCost, on_delete=models.SET_NULL, null=True,
+        TPBatchCostBreakup, on_delete=models.SET_NULL, null=True,
         related_name='batch_cost'
     )
-    batch_pictures = models.ForeignKey(
-        BatchMedia, on_delete=models.SET_NULL, null=True,
-        related_name='batch_media'
-    )
-
     certificates_issued = models.BooleanField(default=False)
 
     class Meta:
@@ -1167,9 +1205,9 @@ class TRClosure(SoftDeleteMixin):
     Training Request level closure, after all batches under it are completed.
     """
     id = models.BigAutoField(primary_key=True)
-    batch = models.ForeignKey(
-        Batch, on_delete=models.SET_NULL, null=True,
-        related_name='batches_in_TR'
+    training = models.ForeignKey(
+        TrainingRequest, on_delete=models.SET_NULL, null=True,
+        related_name='TR_closure'
     )
     hra = models.FileField(
         upload_to='batch_closure_hra/', blank=True, null=True,
@@ -1184,8 +1222,8 @@ class TRClosure(SoftDeleteMixin):
         db_table = 'tms_trclosure'
         managed = True
         indexes = [
-            models.Index(fields=['batch']),
+            models.Index(fields=['training']),
         ]
 
     def __str__(self):
-        return f"TRClosure(Batch {self.batch_id})"
+        return f"TRClosure(training {self.training_id})"

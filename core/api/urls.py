@@ -174,8 +174,11 @@ urlpatterns = [
 
     # Geo-scope of a user / roles
     path('user-geoscope/<int:user_id>/', UserGeoScopeView.as_view(), name='user-geoscope'),
+    path('user-geoscope/', UserGeoScopeLookupView.as_view(), name='user-geoscope-lookup'),
     path('roles/', MasterRolesView.as_view(), name='master-roles'),
     path('states/', MasterStateView.as_view(), name='master-states'),
     path('mandals/', MasterMandalView.as_view(), name='master-mandals'),
-
+    path('users/', MasterUserListView.as_view(), name='master-user-list'),
+    path('users/create/', MasterUserCreateView.as_view(), name='master-user-create'),
+    path('users/<int:user_id>/', MasterUserDetailView.as_view(), name='master-user-detail'),
 ]
