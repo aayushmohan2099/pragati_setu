@@ -166,6 +166,11 @@ router.register(
     tms_views.BatchParticipantCertificateViewSet,
     basename="tms-batch-participant-certificate",
 )
+router.register(
+    r"batch-reports",
+    tms_views.BatchReportViewSet,
+    basename="tms-batch-report",
+)
 
 urlpatterns = [
     # CRUD / core APIs
@@ -202,5 +207,10 @@ urlpatterns = [
         "dmmu/batches/<int:batch_id>/attendance-by-date/",
         dashboard_views.DmmuBatchAttendanceDateAPIView.as_view(),
     ),
+    
+    # Training Report
     path('training-report/<int:id>/', tms_views.TrainingReportView.as_view(), name='training-report'),
+    
+    # Batches List
+    path('batches-list/', tms_views.BatchesListView.as_view(), name='batches-list'),
 ]

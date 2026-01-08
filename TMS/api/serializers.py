@@ -381,10 +381,49 @@ class BatchParticipantCertificateDetailSerializer(SoftDeleteModelSerializer):
         fields = "__all__"
         depth = 1
 
+# Batch List Serializer (for certificates)
+class BatchDistrictSerializer(SoftDeleteModelSerializer):
+    class Meta(SoftDeleteModelSerializer.Meta):
+        model = core_models.MasterDistrict
+        fields = ['district_id', 'district_name_en', 'district_short_name_en']
 
+class BatchBlockSerializer(SoftDeleteModelSerializer):
+    class Meta(SoftDeleteModelSerializer.Meta):
+        model = core_models.MasterBlock
+        fields = ['block_id', 'block_name_en', 'block_name_local', 'is_aspirational']
 
+class BatchCentreSerializer(SoftDeleteModelSerializer):
+    partner = TrainingPartnerSerializer(read_only=True)
+    class Meta(SoftDeleteModelSerializer.Meta):
+        model = tms_models.TrainingPartnerCentre
+        fields = "__all__"
+        
+class BatchTRSerializer(SoftDeleteModelSerializer):
+    district = BatchDistrictSerializer(read_only=True)
+    block = BatchBlockSerializer(read_only=True)
+    theme = TrainingThemeSerializer(read_only=True)
+    
+    class Meta(SoftDeleteModelSerializer.Meta):
+        model = tms_models.TrainingRequest
+        fields = "__all__"
+       
+class BatchListSerializer(serializers.ModelSerializer):
+    request = BatchTRSerializer()
+    centre = BatchCentreSerializer()
 
-
+    class Meta:
+        model = tms_models.Batch
+        fields = [
+            'id',
+            'code',
+            'batch_type',
+            'status',
+            'start_date',
+            'end_date',
+            'time_of_training',
+            'request',
+            'centre'
+        ]
 
 
 
@@ -682,6 +721,11 @@ class TRClosureReportSerializer(SoftDeleteModelSerializer):
         model = tms_models.TRClosure
         fields = ['id', 'hra', 'ta_da']
         
+class BatchCertificateSerializer(SoftDeleteModelSerializer):
+    class Meta(SoftDeleteModelSerializer.Meta):
+        model = tms_models.BatchReport
+        fields = "__all__"
+
 # ----------------------------
 # FINAL TrainingRequestReportSerializer - NO prefetch_related needed
 # ----------------------------

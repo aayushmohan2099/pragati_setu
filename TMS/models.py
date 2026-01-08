@@ -1227,3 +1227,34 @@ class TRClosure(SoftDeleteMixin):
 
     def __str__(self):
         return f"TRClosure(training {self.training_id})"
+
+class BatchReport(SoftDeleteMixin):
+    id = models.BigAutoField(primary_key=True)
+    batch = models.ForeignKey(
+        Batch, on_delete=models.SET_NULL, null=True,
+        related_name='batch_report'
+    )
+
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('BMM_SIGNED', 'Signed by BMMU'),
+        ('DMM_SIGNED', 'Signed by DMMU'),
+        ('SMM_SIGNED', 'Signed by SMMU'),
+    ]
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='DRAFT'
+    )
+    report_file = models.FileField(
+        upload_to='batch_reports/', blank=True, null=True,
+        help_text='Upload Batch Report Document PDF.'
+    )
+
+    class Meta:
+        db_table = 'tms_batchreport'
+        managed = True
+        indexes = [
+            models.Index(fields=['batch']),
+        ]
+
+    def __str__(self):
+        return f"BatchReport(Batch {self.batch_id})"

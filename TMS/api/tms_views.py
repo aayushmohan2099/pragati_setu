@@ -190,6 +190,15 @@ class TrainingPlanViewSet(BaseTMSModelViewSet):
             )
 
         return super().list(request, *args, **kwargs)
+    
+    @action(detail=True, methods=["get"], url_path="detail")
+    def detail_view(self, request, pk=None):
+        """
+        DETAIL view – includes nested theme.
+        """
+        training_plan = self.get_object()
+        serializer = TrainingPlanDetailSerializer(training_plan, context={"request": request})
+        return Response(serializer.data)
 
 # custom paginator
 class TenPerPagePagination(PageNumberPagination):
@@ -680,6 +689,66 @@ class BatchViewSet(BaseTMSModelViewSet):
         batch.save(update_fields=["status"])
         return Response(BatchSerializer(batch, context={"request": request}).data)
 
+class BatchListPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = None
+    max_page_size = 10
+
+class BatchesListView(APIView):
+    def get(self, request):
+        request_id = request.GET.get('request')
+        district_id = request.GET.get('district_id')
+        block_id = request.GET.get('block_id')
+        theme_id = request.GET.get('theme_id')
+        batch_type = request.GET.get('batch_type')
+        status = request.GET.get('status')
+        ordering = request.GET.get('ordering', 'start_date')
+
+        qs = tms_models.Batch.objects.select_related(
+            'request',
+            'request__district',
+            'request__block',
+            'request__training_plan',
+            'request__training_plan__theme',
+            'centre',
+            'centre__partner',
+        )
+
+        location_filter = Q()
+        if district_id:
+            location_filter |= Q(request__district_id=district_id)
+        if block_id:
+            location_filter |= Q(request__block_id=block_id)
+        if theme_id:
+            location_filter |= Q(request__training_plan__theme=theme_id)
+
+        if location_filter:
+            qs = qs.filter(location_filter)
+
+        if batch_type:
+            qs = qs.filter(batch_type=batch_type)
+
+        if request_id:
+            qs = qs.filter(request=request_id)
+
+        if status:
+            qs = qs.filter(status=status)
+
+        allowed_ordering = {
+            'start_date', '-start_date',
+            'end_date', '-end_date'
+        }
+        if ordering not in allowed_ordering:
+            ordering = 'start_date'
+
+        qs = qs.order_by(ordering)
+
+        paginator = BatchListPagination()
+        page = paginator.paginate_queryset(qs, request)
+
+        serializer = BatchListSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
 class BatchScheduleViewSet(BaseTMSModelViewSet):
     """
     Batch Schedule – per batch per day schedule details.
@@ -856,6 +925,15 @@ class TRClosureViewSet(BaseTMSModelViewSet):
     queryset = tms_models.TRClosure.objects.select_related("training")
     serializer_class = TRClosureSerializer
     filterset_fields = ["training"]
+    
+class BatchReportViewSet(BaseTMSModelViewSet):
+    """
+    Batch Report – per batch full report details.
+    """
+    swagger_schema = ReportsSchema
+    queryset = tms_models.BatchReport.objects.select_related("batch")
+    serializer_class = BatchCertificateSerializer
+    filterset_fields = ["batch"]    
 
 class TrainingReportView(APIView):
     """

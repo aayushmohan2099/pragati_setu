@@ -132,7 +132,7 @@ class DistrictListView(generics.ListAPIView):
     serializer_class = MasterDistrictListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['district_name_en', 'district_name_local', 'district_short_name_en']
+    SEARCH_FIELDS = ['district_id', 'district_name_en', 'district_name_local', 'district_short_name_en']
     ALLOWED_FILTERS = {'state_id': 'state_id', 'is_active': 'is_active'}
     ALLOWED_ORDERING = {'district_id', 'district_name_en', 'created_at'}
 
@@ -189,7 +189,7 @@ class BlockListView(generics.ListAPIView):
     serializer_class = MasterBlockListSerializer
     pagination_class = FlexiblePagination
 
-    SEARCH_FIELDS = ['block_name_en', 'block_name_local', 'block_code']
+    SEARCH_FIELDS = ['block_id', 'block_name_en', 'block_name_local', 'block_code']
     ALLOWED_FILTERS = {'district_id': 'district_id', 'state_id': 'state_id', 'is_aspirational': 'is_aspirational'}
     ALLOWED_ORDERING = {'block_id', 'block_name_en', 'created_at'}
     ALLOWED_GROUP_BY = {'district_id', 'is_aspirational'}
