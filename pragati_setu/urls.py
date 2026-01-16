@@ -24,6 +24,7 @@ urlpatterns = [
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('health', health),
     path("api/v1/tms/", include("TMS.api.urls")),
+    # path("api/v1/ldms/", include("LDMS.api.urls")),
 ]
 
 urlpatterns += [

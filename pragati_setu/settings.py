@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'core',
     'epSakhi',
     'TMS',
+    'LDMS',
 ]
 
 # =========================
