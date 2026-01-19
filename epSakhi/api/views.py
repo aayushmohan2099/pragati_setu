@@ -6,6 +6,8 @@ from io import StringIO
 from collections import defaultdict
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from django.conf import settings
 from django.core.cache import cache
@@ -170,8 +172,8 @@ def _apply_fields_projection_list(rows, fields_param):
 # -------------------------------------------------------------------
 
 def _get_apisetu_headers():
-    client_id = getattr(settings, "APISETU_CLIENT_ID", None)
-    api_key = getattr(settings, "APISETU_API_KEY", None)
+    client_id = settings.APISETU_CLIENT_ID
+    api_key = settings.APISETU_API_KEY
     if not client_id or not api_key:
         raise RuntimeError("APISETU_CLIENT_ID / APISETU_API_KEY must be set in settings")
     return {
@@ -182,15 +184,42 @@ def _get_apisetu_headers():
 
 
 def _call_apisetu_shg_list(block_id: int):
-    template = getattr(
-        settings,
-        "APISETU_SHG_LIST_URL_TEMPLATE",
-        "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg/block?block_id={block_id}",
-    )
+    template = "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg/block?block_id={block_id}"
+    
+    if not template:
+        raise RuntimeError("APISETU_SHG_LIST_URL_TEMPLATE is not configured")
+
     url = template.format(block_id=block_id)
-    resp = requests.get(url, headers=_get_apisetu_headers(), timeout=30)
+
+    # -------------------------------
+    # NEW (SURGICAL): retries + backoff
+    # -------------------------------
+    session = requests.Session()
+
+    retry = Retry(
+        total=3,
+        backoff_factor=1,               # 1s, 2s, 4s
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        raise_on_status=False
+    )
+
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    # -------------------------------
+
+    resp = session.get(
+        url,
+        headers=_get_apisetu_headers(),
+        timeout=(5, 60)   # connect timeout, read timeout
+    )
+
     if resp.status_code != 200:
-        raise RuntimeError(f"APISetu SHG list error {resp.status_code}: {resp.text[:200]}")
+        raise RuntimeError(
+            f"APISetu SHG list error {resp.status_code}: {resp.text[:200]}"
+        )
+
     data = resp.json()
 
     # # NEW: import into master_* tables on first fetch (view will cache separately)
@@ -204,15 +233,38 @@ def _call_apisetu_shg_list(block_id: int):
 
 
 def _call_apisetu_shg_detail(shg_code: str):
-    template = getattr(
-        settings,
-        "APISETU_SHG_DETAIL_URL_TEMPLATE",
-        "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg?shg_code={shg_code}",
-    )
+    template = "https://apisetu.gov.in/mord/lokos/srv/v1/up/shg?shg_code={shg_code}"
     url = template.format(shg_code=shg_code)
-    resp = requests.get(url, headers=_get_apisetu_headers(), timeout=30)
+
+    # -------------------------------
+    # NEW (SURGICAL): retries + backoff
+    # -------------------------------
+    session = requests.Session()
+
+    retry = Retry(
+        total=3,
+        backoff_factor=1,               # 1s, 2s, 4s
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        raise_on_status=False
+    )
+
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    # -------------------------------
+
+    resp = session.get(
+        url,
+        headers=_get_apisetu_headers(),
+        timeout=(5, 60)   # connect timeout, read timeout
+    )
+
     if resp.status_code != 200:
-        raise RuntimeError(f"APISetu SHG detail error {resp.status_code}: {resp.text[:200]}")
+        raise RuntimeError(
+            f"APISetu SHG detail error {resp.status_code}: {resp.text[:200]}"
+        )
+
     data = resp.json()
 
     # # NEW: import into master_* tables

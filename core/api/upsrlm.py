@@ -4,6 +4,8 @@ import logging
 from typing import List, Dict, Any, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from django.conf import settings
 from django.core.cache import cache
@@ -22,12 +24,13 @@ logger = logging.getLogger(__name__)
 # Config
 # -------------------------------------------------------------------
 
-UPSRLM_APISETU_BASE = getattr(
-    settings,
-    "UPSRLM_APISETU_BASE",
-    "https://apisetu.gov.in/mord/lokos/srv/v1/up",
-)
-
+def get_upsrlm_base():
+    return getattr(
+        settings,
+        "UPSRLM_APISETU_BASE",
+        "https://apisetu.gov.in/mord/lokos/srv/v1/up",
+    )
+    
 UPSRLM_CACHE_TTL = getattr(settings, "CACHE_TTL", 300)
 
 def get_apisetu_headers() -> Dict[str, str]:
@@ -38,19 +41,18 @@ def get_apisetu_headers() -> Dict[str, str]:
         APISETU_CLIENT_ID = '...'
         APISETU_API_KEY = '...'
     """
-    client_id = getattr(settings, "APISETU_CLIENT_ID", None)
-    api_key = getattr(settings, "APISETU_API_KEY", None)
+    client_id = settings.APISETU_CLIENT_ID
+    api_key = settings.APISETU_API_KEY
 
     if not client_id or not api_key:
         raise RuntimeError(
             "APISETU_CLIENT_ID / APISETU_API_KEY are not configured "
-            "in Django settings. Please set them before using UPSRLM endpoints."
         )
 
     return {
         "X-APISETU-CLIENTID": client_id,
         "X-APISETU-APIKEY": api_key,
-        "scope": "lgd",
+        # "scope": "lgd",
         "accept": "application/json",
     }
 
@@ -299,10 +301,34 @@ class BaseUpsrlmView(APIView):
         if cached is not None:
             return cached
 
-        url = f"{UPSRLM_APISETU_BASE.rstrip('/')}/{path.lstrip('/')}"
+        url = f"{get_upsrlm_base().rstrip('/')}/{path.lstrip('/')}"
         headers = get_apisetu_headers()
+
+        # -------------------------------
+        # NEW (SURGICAL): retries + backoff
+        # -------------------------------
+        session = requests.Session()
+
+        retry = Retry(
+            total=3,
+            backoff_factor=1,               # 1s, 2s, 4s
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"],
+            raise_on_status=False,
+        )
+
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        # -------------------------------
+
         try:
-            resp = requests.get(url, headers=headers, params=params or {}, timeout=30)
+            resp = session.get(
+                url,
+                headers=headers,
+                params=params or {},
+                timeout=(5, 60),   # connect timeout, read timeout
+            )
         except requests.RequestException as exc:
             logger.exception("Error calling UPSRLM API (%s)", url)
             raise RuntimeError("Error calling UPSRLM APISetu gateway") from exc

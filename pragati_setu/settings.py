@@ -16,6 +16,7 @@ APISETU_API_KEY = os.getenv('APISETU_API_KEY', '')
 APISETU_SHG_LIST_URL_TEMPLATE = os.getenv('APISETU_SHG_LIST_URL_TEMPLATE', '')
 APISETU_SHG_DETAIL_URL_TEMPLATE = os.getenv('APISETU_SHG_DETAIL_URL_TEMPLATE', '')
 SHG_CACHE_TTL = int(os.getenv('SHG_CACHE_TTL', '300'))
+CACHE_TTL = int(os.getenv('CACHE_TTL', '300'))
 
 # =========================
 # APPS
