@@ -7,6 +7,7 @@ from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.utils.timezone import now
 
 from core.models import MasterBlock, MasterVillage
 from core.api.upsrlm import (
@@ -44,33 +45,28 @@ def build_district_analytics(district_id: int) -> dict:
     result = {
         "district_id": district_id,
         "blocks": [],
+        "generated_at": now(),
     }
 
     for blk in blocks:
         block_id = blk["block_id"]
+        bcache = cache.get(f"analytics:block:{block_id}")
 
-        try:
-            vo_raw = UpsrlmVoListView().fetch_from_apisetu(
-                f"analytics:vo:{block_id}",
-                "vo/block",
-                {"block_id": block_id},
+        if not bcache:
+            logger.warning(
+                "Block cache missing for block_id=%s (district=%s)",
+                block_id, district_id
             )
-            clf_raw = UpsrlmClfListView().fetch_from_apisetu(
-                f"analytics:clf:{block_id}",
-                "clf/block",
-                {"block_id": block_id},
-            )
-            shg_raw = _call_apisetu_shg_list(block_id)
-        except Exception:
-            logger.exception("Skipping block_id=%s due to API error", block_id)
             continue
+
+        totals = bcache.get("totals", {})
 
         result["blocks"].append({
             "block_id": block_id,
             "block_name": blk["block_name_en"],
-            "total_vos": len(_normalize_list(vo_raw)),
-            "total_clfs": len(_normalize_list(clf_raw)),
-            "total_shgs": len(_normalize_list(shg_raw)),
+            "total_vos": totals.get("total_vos", 0),
+            "total_clfs": totals.get("total_clfs", 0),
+            "total_shgs": totals.get("total_shgs", 0),
         })
 
     return result

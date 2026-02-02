@@ -586,6 +586,8 @@ class BeneficiaryRecordedViewSet(viewsets.ModelViewSet, BaseProjectionMixin):
             qs = qs.filter(marital_status=params['marital_status'])
         if params.get('category'):
             qs = qs.filter(category=params['category'])
+        if params.get('pld_status'):
+            qs = qs.filter(pld_status=params['pld_status'])
         return qs
 
 

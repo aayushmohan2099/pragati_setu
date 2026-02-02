@@ -26,18 +26,8 @@ from django.db.models.functions import ExtractYear, Now
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 
-from core.models import (
-    MasterDistrict, MasterBlock, MasterPanchayat,
-    MasterVillage, MasterShgList, MasterShgAddresses,
-    MasterShgBanks, MasterShgPhone, MasterBeneficiary,
-    MasterBeneficiaryAddress, MasterBeneficiaryBank,
-    MasterBeneficiaryDesignation, MasterBeneficiaryPhone,
-    MasterClfList, MasterClfAddresses, MasterClfBanks,
-    MasterClfPhones, MasterClfVoDetails,
-    MasterMembersUnderClf, MasterPanchayatsUnderClf, MasterVillagesUnderClf,
-    MasterGeoUserScope, MasterUser, MasterRoles, MasterState, MasterMandal
-)
-from core.api.serializers import *  # keep existing serializer names
+from core.models import *
+from core.api.serializers import * 
 
 CACHE_TTL = getattr(settings, 'CACHE_TTL', 300)
 
@@ -122,6 +112,73 @@ def apply_group_by(qs, request, allowed_group_by, id_field='id'):
     agg = qs.values(*chosen).annotate(count=Count(id_field)).order_by(*chosen)
     return list(agg)
 
+# ----------------------------
+# Mandals (list)
+# ----------------------------
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class MasterMandalView(generics.ListAPIView):
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = MasterMandalSerializer
+    pagination_class = FlexiblePagination
+
+    SEARCH_FIELDS = ['name', 'th_urid']
+    ALLOWED_FILTERS = {'created_by': 'created_by'}
+    ALLOWED_ORDERING = {'id', 'name', 'created_at'}
+    ALLOWED_GROUP_BY = {'created_by'}
+
+    def get_queryset(self):
+        qs = MasterMandal.objects.all().select_related('created_by').order_by('name').only('id', 'name', 'th_urid', 'created_at', 'updated_at', 'created_by_id', 'updated_by_id')
+        qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
+        qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
+        qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
+        return qs
+
+# ----------------------------
+# District Categories (list)
+# ----------------------------
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class DistrictCategoryView(generics.ListAPIView):
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = MasterDistrictCategorySerializer
+    pagination_class = FlexiblePagination
+
+    SEARCH_FIELDS = ['name']
+    ALLOWED_FILTERS = {'id': 'id'}
+    ALLOWED_ORDERING = {'id', 'name', 'created_at'}
+    ALLOWED_GROUP_BY = {'updated_at'}
+
+    def get_queryset(self):
+        qs = MasterDistrictCategory.objects.all().order_by('name').only('id', 'name', 'created_at', 'updated_at')
+        qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
+        qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
+        qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
+        return qs
+
+# ----------------------------
+# District Category Mapping (list)
+# ----------------------------
+@method_decorator(cache_page(CACHE_TTL), name='get')
+class DistrictCategoryMappingView(generics.ListAPIView):
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = MasterDistrictCategoryMappingSerializer
+    pagination_class = FlexiblePagination
+
+    SEARCH_FIELDS = ['district__district_name_en', 'category__name']
+    ALLOWED_FILTERS = {'district_id': 'district_id', 'category_id': 'category_id'}
+    ALLOWED_ORDERING = {'id', 'district_id', 'category_id', 'created_at'}
+    ALLOWED_GROUP_BY = {'district_id', 'category_id'}
+
+    def get_queryset(self):
+        qs = MasterDistrictCategoryMapping.objects.all() \
+            .select_related('district', 'category') \
+            .order_by('district_id') \
+            .only('id', 'district__district_name_en', 'category__name', 'created_at', 'updated_at')
+
+        qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
+        qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
+        qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
+
+        return qs
 
 # ----------------------------
 # Districts (list + detail)
@@ -133,7 +190,7 @@ class DistrictListView(generics.ListAPIView):
     pagination_class = FlexiblePagination
 
     SEARCH_FIELDS = ['district_id', 'district_name_en', 'district_name_local', 'district_short_name_en']
-    ALLOWED_FILTERS = {'state_id': 'state_id', 'is_active': 'is_active'}
+    ALLOWED_FILTERS = {'state_id': 'state_id', 'is_active': 'is_active', 'mandal_id': 'mandal_id'}
     ALLOWED_ORDERING = {'district_id', 'district_name_en', 'created_at'}
 
     def get_queryset(self):
@@ -813,26 +870,6 @@ class MasterStateView(generics.ListAPIView):
         qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
         return qs
 
-
-@method_decorator(cache_page(CACHE_TTL), name='get')
-class MasterMandalView(generics.ListAPIView):
-    permission_classes = (permissions.AllowAny,)
-    serializer_class = MasterMandalSerializer
-    pagination_class = FlexiblePagination
-
-    SEARCH_FIELDS = ['name', 'th_urid']
-    ALLOWED_FILTERS = {'created_by': 'created_by'}
-    ALLOWED_ORDERING = {'id', 'name', 'created_at'}
-    ALLOWED_GROUP_BY = {'created_by'}
-
-    def get_queryset(self):
-        qs = MasterMandal.objects.all().select_related('created_by').order_by('name').only('id', 'name', 'th_urid', 'created_at', 'updated_at', 'created_by_id', 'updated_by_id')
-        qs = apply_filters(qs, self.request, self.ALLOWED_FILTERS)
-        qs = apply_search(qs, self.request, self.SEARCH_FIELDS)
-        qs = apply_ordering(qs, self.request, self.ALLOWED_ORDERING)
-        return qs
-
-
 # ----------------------------
 # User GeoScope view
 # ----------------------------
@@ -912,3 +949,17 @@ class UserGeoScopeLookupView(APIView):
             "users_exist": bool(user_ids),
             "user_ids": user_ids
         })
+        
+class IsBlockAspirationalView(APIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def get(self, request, block_id=None):
+        if not block_id:
+            return Response({'detail': 'block_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            block = MasterBlock.objects.only('is_aspirational').get(block_id=block_id)
+        except MasterBlock.DoesNotExist:
+            return Response({'detail': 'Block not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({'block_id': block_id, 'is_aspirational': block.is_aspirational})        

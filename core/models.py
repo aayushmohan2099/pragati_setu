@@ -101,12 +101,34 @@ class MasterMandal(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(unique=True, max_length=255)
     th_urid = models.CharField(db_column='TH_urid', unique=True, max_length=36)
+
     created_at = models.DateTimeField(blank=True, null=True)
     updated_at = models.DateTimeField(blank=True, null=True)
     deleted_at = models.DateTimeField(blank=True, null=True)
-    created_by = models.ForeignKey(MasterUser, models.DO_NOTHING, db_column='created_by', blank=True, null=True)
-    updated_by = models.ForeignKey(MasterUser, models.DO_NOTHING, db_column='updated_by', related_name='mastermandal_updated_by_set', blank=True, null=True)
-    deleted_by = models.ForeignKey(MasterUser, models.DO_NOTHING, db_column='deleted_by', related_name='mastermandal_deleted_by_set', blank=True, null=True)
+
+    created_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='created_by',
+        blank=True,
+        null=True
+    )
+    updated_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='updated_by',
+        related_name='mastermandal_updated_by_set',
+        blank=True,
+        null=True
+    )
+    deleted_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='deleted_by',
+        related_name='mastermandal_deleted_by_set',
+        blank=True,
+        null=True
+    )
 
     class Meta:
         managed = False
@@ -115,12 +137,57 @@ class MasterMandal(models.Model):
     def __str__(self):
         return self.name
 
+class MasterDistrictCategory(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(unique=True, max_length=255)
+    th_urid = models.CharField(db_column='TH_urid', unique=True, max_length=36)
+
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+    deleted_at = models.DateTimeField(blank=True, null=True)
+
+    created_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='created_by',
+        blank=True,
+        null=True
+    )
+    updated_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='updated_by',
+        related_name='masterdistrictcategory_updated_by_set',
+        blank=True,
+        null=True
+    )
+    deleted_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='deleted_by',
+        related_name='masterdistrictcategory_deleted_by_set',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        managed = False
+        db_table = 'master_district_category'
+
+    def __str__(self):
+        return self.name
 
 class MasterDistrict(models.Model):
     district_id = models.BigIntegerField(primary_key=True)
     district_code = models.CharField(max_length=50, blank=True, null=True)
     state = models.ForeignKey(MasterState, on_delete=models.DO_NOTHING)
-    mandal = models.ForeignKey(MasterMandal, on_delete=models.DO_NOTHING, blank=True, null=True)
+    mandal = models.ForeignKey(
+        MasterMandal,
+        models.DO_NOTHING,
+        db_column='mandal_id',
+        blank=True,
+        null=True
+    )
     district_name_en = models.CharField(max_length=255)
     district_short_name_en = models.CharField(max_length=50, blank=True, null=True)
     district_name_local = models.CharField(max_length=255, blank=True, null=True)
@@ -136,6 +203,54 @@ class MasterDistrict(models.Model):
     def __str__(self):
         return self.district_name_en
 
+class MasterDistrictCategoryMapping(models.Model):
+    id = models.BigAutoField(primary_key=True)
+
+    district = models.ForeignKey(
+        MasterDistrict,
+        models.DO_NOTHING,
+        db_column='district_id'
+    )
+
+    category = models.ForeignKey(
+        MasterDistrictCategory,
+        models.DO_NOTHING,
+        db_column='category_id'
+    )
+
+    th_urid = models.CharField(db_column='TH_urid', unique=True, max_length=36)
+
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+    deleted_at = models.DateTimeField(blank=True, null=True)
+
+    created_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='created_by',
+        blank=True,
+        null=True
+    )
+    updated_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='updated_by',
+        related_name='masterdistrictcategorymapping_updated_by_set',
+        blank=True,
+        null=True
+    )
+    deleted_by = models.ForeignKey(
+        MasterUser,
+        models.DO_NOTHING,
+        db_column='deleted_by',
+        related_name='masterdistrictcategorymapping_deleted_by_set',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        managed = False
+        db_table = 'master_district_category_mapping'
 
 class MasterBlock(models.Model):
     block_id = models.BigIntegerField(primary_key=True)

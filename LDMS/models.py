@@ -57,6 +57,54 @@ class SoftDeleteMixin(models.Model):
     def hard_delete(self):
         super().delete()
 
+# Global Analytics Models
+class State_Analytics(SoftDeleteMixin):
+    id = models.AutoField(primary_key=True, db_column='state_analytics_id')
+    total_vos = models.CharField(max_length=255, db_column='total_vos', null=True, blank=True)
+    total_clfs = models.TextField(db_column='total_clfs', null=True, blank=True)
+    total_shgs = models.TextField(db_column='total_shgs', null=True, blank=True)
+    total_rural_hh = models.TextField(db_column='total_rural_hh', null=True, blank=True)
+    total_hh_under_shgs = models.TextField(db_column='total_hh_under_shgs', null=True, blank=True)
+
+    class Meta:
+        db_table = 'ldms_state_analytics'
+        verbose_name = 'State Analytics'
+        verbose_name_plural = 'State Analytics Records'
+
+class District_Analytics(SoftDeleteMixin):
+    id = models.AutoField(primary_key=True, db_column='dist_analytics_id')
+    district = models.ForeignKey(
+        MasterDistrict, on_delete=models.PROTECT,
+        db_column='district_id', db_constraint=False
+    )
+    total_vos = models.CharField(max_length=255, db_column='total_vos', null=True, blank=True)
+    total_clfs = models.TextField(db_column='total_clfs', null=True, blank=True)
+    total_shgs = models.TextField(db_column='total_shgs', null=True, blank=True)
+    total_rural_hh = models.TextField(db_column='total_rural_hh', null=True, blank=True)
+    total_hh_under_shgs = models.TextField(db_column='total_hh_under_shgs', null=True, blank=True)
+
+    class Meta:
+        db_table = 'ldms_district_analytics'
+        verbose_name = 'District Analytics'
+        verbose_name_plural = 'District Analytics Records'
+
+class Block_Analytics(SoftDeleteMixin):
+    id = models.AutoField(primary_key=True, db_column='block_analytics_id')
+    block = models.ForeignKey(
+        MasterBlock, on_delete=models.PROTECT,
+        db_column='block_id', db_constraint=False
+    )   
+    total_vos = models.CharField(max_length=255, db_column='total_vos', null=True, blank=True)
+    total_clfs = models.TextField(db_column='total_clfs', null=True, blank=True)
+    total_shgs = models.TextField(db_column='total_shgs', null=True, blank=True)
+    total_rural_hh = models.TextField(db_column='total_rural_hh', null=True, blank=True)
+    total_hh_under_shgs = models.TextField(db_column='total_hh_under_shgs', null=True, blank=True)
+
+    class Meta:
+        db_table = 'ldms_block_analytics'
+        verbose_name = 'Block Analytics'
+        verbose_name_plural = 'Block Analytics Records'        
+
 # DLCC and BLCC Meeting Models
 class DLCC_Meeting_List(SoftDeleteMixin):
     id = models.AutoField(primary_key=True, db_column='dlcc_meeting_list_id')
@@ -74,10 +122,6 @@ class DLCC_Meeting_List(SoftDeleteMixin):
         db_table = 'ldms_dlcc_meeting_list'
         verbose_name = 'DLCC Meeting List'
         verbose_name_plural = 'DLCC Meeting Lists'
-
-    def clean(self):
-        if self.meeting_date > timezone.now().date():
-            raise ValidationError("Meeting date cannot be in the future.")
         
 class DLCC_Meeting(SoftDeleteMixin):
     id = models.AutoField(primary_key=True, db_column='dlcc_meeting_id')
@@ -119,10 +163,6 @@ class BLCC_Meeting_List(SoftDeleteMixin):
         db_table = 'ldms_blcc_meeting_list'
         verbose_name = 'BLCC Meeting List'
         verbose_name_plural = 'BLCC Meeting Lists'
-
-    def clean(self):
-        if self.meeting_date > timezone.now().date():
-            raise ValidationError("Meeting date cannot be in the future.")        
 
 class BLCC_Meeting(SoftDeleteMixin):
     id = models.AutoField(primary_key=True, db_column='blcc_meeting_id')
@@ -167,7 +207,13 @@ class Scheme(SoftDeleteMixin):
         db_column='department_id', db_constraint=False
     )
     name = models.CharField(max_length=255, db_column='name')
-
+    code = models.CharField(max_length=100, db_column='code', null=True, blank=True)
+    assistance = models.TextField(db_column='assistance', null=True, blank=True)
+    elligibility = models.TextField(db_column='elligibility', null=True, blank=True)
+    scope = models.TextField(db_column='scope', null=True, blank=True)
+    funding = models.TextField(db_column='funding', null=True, blank=True)
+    contact_point = models.TextField(db_column='contact_point', null=True, blank=True)
+    
     class Meta:
         db_table = 'ldms_scheme'
         verbose_name = 'Scheme'
@@ -182,7 +228,9 @@ class recorded_benefs(SoftDeleteMixin):
     lokos_member_code = models.CharField(max_length=100, db_column='lokos_member_code')
     pld_status = models.CharField(max_length=100, null=True, blank=True)
     member_name = models.CharField(max_length=255)
+    designation = models.CharField(max_length=255, null=True, blank=True)
     gender = models.CharField(max_length=50, null=True, blank=True)
+    religion = models.CharField(max_length=100, null=True, blank=True)
     marital_status = models.CharField(max_length=50, null=True, blank=True)
     father_husband_name = models.CharField(max_length=255, null=True, blank=True)
     social_category = models.CharField(max_length=255, null=True, blank=True)
@@ -220,6 +268,15 @@ class recorded_benefs(SoftDeleteMixin):
         verbose_name = 'Recorded Beneficiary'
         verbose_name_plural = 'Recorded Beneficiaries'
 
+class SBtypes(SoftDeleteMixin):
+    id = models.AutoField(primary_key=True, db_column='sbtypes_id')
+    bucket_type = models.CharField(max_length=255, db_column='bucket_type')
+
+    class Meta:
+        db_table = 'ldms_sbtypes'
+        verbose_name = 'Support Bucket Type'
+        verbose_name_plural = 'Support Bucket Types'
+        
 class SupportBucket(SoftDeleteMixin):
     id = models.AutoField(primary_key=True, db_column='support_bucket_id')
     department = models.ForeignKey(
@@ -230,16 +287,13 @@ class SupportBucket(SoftDeleteMixin):
         Scheme, on_delete=models.PROTECT,
         db_column='scheme_id', db_constraint=False
     )
-    benefit_name = models.CharField(max_length=255, db_column='benefit_name')
-    training_theme = models.ForeignKey(
-        TrainingTheme, on_delete=models.PROTECT,
-        db_column='training_theme_id', db_constraint=False, null=True, blank=True
+    bucket_type = models.ForeignKey(
+        SBtypes, on_delete=models.PROTECT,
+        db_column='bucket_type_id', db_constraint=False,
+        null=True, blank=True
     )
-    training_plan = models.ForeignKey(
-        TrainingPlan, on_delete=models.PROTECT,
-        db_column='training_plan_id', db_constraint=False, null=True, blank=True
-    )
-    benefit_amount = models.DecimalField(max_digits=10, decimal_places=2, db_column='benefit_amount')
+    benefit_name = models.CharField(max_length=255, db_column='benefit_name', null=True, blank=True)
+    benefit_amount = models.DecimalField(max_digits=10, decimal_places=2, db_column='benefit_amount', null=True, blank=True)
     benefit_description = models.TextField(db_column='benefit_description', null=True, blank=True)
     
     class Meta:
@@ -247,6 +301,62 @@ class SupportBucket(SoftDeleteMixin):
         verbose_name = 'Support Bucket'
         verbose_name_plural = 'Support Buckets'
         
+class TrainingSupport(SoftDeleteMixin):
+    id = models.AutoField(primary_key=True, db_column='training_support_id')
+    training_theme = models.ForeignKey(
+        TrainingTheme, on_delete=models.PROTECT,
+        db_column='training_theme_id', db_constraint=False
+    )
+    training_plan = models.ForeignKey(
+        TrainingPlan, on_delete=models.PROTECT,
+        db_column='training_plan_id', db_constraint=False
+    )
+    support_bucket = models.ForeignKey(
+        SupportBucket, on_delete=models.PROTECT,
+        db_column='support_bucket_id', db_constraint=False
+    )
+
+    class Meta:
+        db_table = 'ldms_training_support'
+        verbose_name = 'Training Support'
+        verbose_name_plural = 'Training Supports'        
+
+# Bucket Approval
+class Bucket_Approval(SoftDeleteMixin):
+    id = models.AutoField(primary_key=True, db_column='bucket_approval_id')
+    support_bucket = models.ForeignKey(
+        SupportBucket, on_delete=models.PROTECT,
+        db_column='support_bucket_id', db_constraint=False
+    )
+    STATUS = [
+        ('DRAFT', 'Draft'),
+        ('PENDING', 'Pending Approval'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
+    approval_status = models.CharField(max_length=50, choices=STATUS, default='DRAFT', db_column='approval_status')
+    rejection_reason = models.TextField(db_column='rejection_reason', null=True, blank=True)
+    
+    block_id = models.ForeignKey(
+        MasterBlock, on_delete=models.PROTECT,
+        db_column='block_id', db_constraint=False, null=True, blank=True
+    )
+    panchayat_id = models.ForeignKey(
+        MasterPanchayat, on_delete=models.PROTECT,
+        db_column='panchayat_id', db_constraint=False, null=True, blank=True
+    )    
+    
+    approved_by = models.ForeignKey(
+        MasterUser, null=True, blank=True, on_delete=models.SET_NULL,
+        db_column='approved_by', related_name='+', db_constraint=False
+    )
+    approval_date = models.DateField(db_column='approval_date', null=True, blank=True)
+
+    class Meta:
+        db_table = 'ldms_bucket_approval'
+        verbose_name = 'Bucket Approval'
+        verbose_name_plural = 'Bucket Approvals'
+            
 # Plans and Activities Models
 class AEP_Plan(SoftDeleteMixin):
     id = models.AutoField(primary_key=True, db_column='aep_plan_id')

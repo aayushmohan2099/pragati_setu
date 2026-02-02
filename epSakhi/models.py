@@ -116,6 +116,7 @@ class BeneficiaryRecorded(SoftDeleteMixin):
     marital_status = models.CharField(max_length=50, null=True, blank=True)
     father_husband_name = models.CharField(max_length=255, null=True, blank=True)
     category = models.CharField(max_length=255, null=True, blank=True)
+    pld_status = models.CharField(max_length=255, null=True, blank=True)
 
     enterprise_type = models.CharField(max_length=255, null=True, blank=True)
     special_category = models.CharField(max_length=255, null=True, blank=True)

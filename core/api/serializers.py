@@ -150,6 +150,10 @@ class MasterMandalSerializer(serializers.ModelSerializer):
         model = models.MasterMandal
         fields = '__all__'
 
+class MasterDistrictCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.MasterDistrictCategory
+        fields = '__all__'
 
 class MasterDistrictDetailSerializer(serializers.ModelSerializer):
     # nested state & mandal fully for detail endpoint
@@ -160,6 +164,13 @@ class MasterDistrictDetailSerializer(serializers.ModelSerializer):
         model = models.MasterDistrict
         fields = '__all__'
 
+class MasterDistrictCategoryMappingSerializer(serializers.ModelSerializer):
+    district = MasterDistrictListSerializer(read_only=True)
+    category = MasterDistrictCategorySerializer(read_only=True)
+
+    class Meta:
+        model = models.MasterDistrictCategoryMapping
+        fields = '__all__'
 
 class MasterBlockDetailSerializer(serializers.ModelSerializer):
     state = MasterStateSerializer(read_only=True)

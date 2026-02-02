@@ -38,6 +38,7 @@ urlpatterns = [
         name="block-list-by-district",
     ),
     path("blocks/detail/<int:block_id>/", BlockDetailView.as_view(), name="block-detail"),
+    path("blocks/is-aspirational/<int:block_id>/", IsBlockAspirationalView.as_view(), name="block-is-aspirational"),
 
     # ----------------------------
     # Panchayats
@@ -178,6 +179,8 @@ urlpatterns = [
     path('roles/', MasterRolesView.as_view(), name='master-roles'),
     path('states/', MasterStateView.as_view(), name='master-states'),
     path('mandals/', MasterMandalView.as_view(), name='master-mandals'),
+    path('district-categories/', DistrictCategoryView.as_view(), name='master-district-categories'),
+    path('dc-mappings/', DistrictCategoryMappingView.as_view(), name='master-district-category-mappings'),
     path('users/', MasterUserListView.as_view(), name='master-user-list'),
     path('users/create/', MasterUserCreateView.as_view(), name='master-user-create'),
     path('users/<int:user_id>/', MasterUserDetailView.as_view(), name='master-user-detail'),
