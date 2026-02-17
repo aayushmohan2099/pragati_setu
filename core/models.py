@@ -55,7 +55,7 @@ class MasterUser(models.Model):
     deleted_by = models.ForeignKey('self', models.DO_NOTHING, db_column='deleted_by', related_name='masteruser_deleted_by_set', blank=True, null=True)
 
     class Meta:
-        managed = True
+        managed = False
         db_table = 'master_user'
 
     def __str__(self):

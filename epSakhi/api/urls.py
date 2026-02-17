@@ -3,60 +3,96 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from .views import (
-    # main viewsets
-    CRPEPViewSet,
-    CRPPanchayatMappingViewSet,
-    BeneficiaryRecordedViewSet,
-    ExistingEnterpriseViewSet,
-    NewEnterpriseViewSet,
-
-    # child table viewsets
-    EnterpriseLoanDetailViewSet,
-    EnterpriseSupportDetailViewSet,
-    EnterpriseTrainingReqViewSet,
-    EnterpriseMediaViewSet,
-
-    # NEW child viewsets
-    EnterpriseProductViewSet,
-    EnterpriseTypeCategoryViewSet,
-    NoEnterpriseFormViewSet,
-    NoEnterpriseWageViewSet,
-
-    # SHG proxy endpoints
-    UpsrlmShgListView,
-    UpsrlmShgMembersView,
-    UpsrlmShgDetailView,
-
-    # CRP helper APIs
-    CRPListByClfView,
-    CRPDetailView,
-    CRPDetailbyUserID,
-    CRPPanchayatsUnderCrpView,
-    CRPPanchayatsUnderCrpByID,
-
-    # epSakhi helper APIs
-    EpsakhiListByShgView,
-    EpsakhiDetailByMemberView,
-)
+from .views import *
+from .analytics_views import *
 
 router = DefaultRouter()
 router.register('crp', CRPEPViewSet, basename='crp')
 router.register('recorded-beneficiaries', BeneficiaryRecordedViewSet, basename='recorded-beneficiaries')
 router.register('existing-enterprise', ExistingEnterpriseViewSet, basename='existing-enterprise')
 router.register('new-enterprise', NewEnterpriseViewSet, basename='new-enterprise')
-
-# child table routers
-router.register('enterprise-loan-details', EnterpriseLoanDetailViewSet, basename='enterprise-loan-details')
-router.register('enterprise-support-details', EnterpriseSupportDetailViewSet, basename='enterprise-support-details')
-router.register('enterprise-training-reqs', EnterpriseTrainingReqViewSet, basename='enterprise-training-reqs')
-router.register('enterprise-media', EnterpriseMediaViewSet, basename='enterprise-media')
-
-# NEW: extra detail routers
-router.register('enterprise-products', EnterpriseProductViewSet, basename='enterprise-products')
-router.register('enterprise-types', EnterpriseTypeCategoryViewSet, basename='enterprise-types')
 router.register('no-enterprise-forms', NoEnterpriseFormViewSet, basename='no-enterprise-forms')
 router.register('no-enterprise-wages', NoEnterpriseWageViewSet, basename='no-enterprise-wages')
+
+# child table routers
+router.register(
+    r'enterprise-licenses',
+    EnterpriseLicensesViewSet,
+    basename='enterprise-licenses'
+)
+
+router.register(
+    r'enterprise-loan-details',
+    EnterpriseLoanDetailViewSet,
+    basename='enterprise-loan-details'
+)
+
+router.register(
+    r'enterprise-subsidy-details',
+    EnterpriseSubsidyDetailViewSet,
+    basename='enterprise-subsidy-details'
+)
+
+router.register(
+    r'enterprise-shop',
+    EnterpriseShopViewSet,
+    basename='enterprise-shop'
+)
+
+router.register(
+    r'shop-media',
+    ShopMediaViewSet,
+    basename='shop-media'
+)
+
+router.register(
+    r'enterprise-products',
+    EnterpriseProductViewSet,
+    basename='enterprise-products'
+)
+
+router.register(
+    r'product-media',
+    ProductMediaViewSet,
+    basename='product-media'
+)
+
+router.register(
+    r'enterprise-media',
+    EnterpriseMediaViewSet,
+    basename='enterprise-media'
+)
+
+# Shared tables (enterprise_id = TH_urid, existing + new)
+router.register(
+    r'enterprise-types',
+    EnterpriseTypeCategoryViewSet,
+    basename='enterprise-types'
+)
+
+router.register(
+    r'enterprise-support',
+    EnterpriseSupportViewSet,
+    basename='enterprise-support'
+)
+
+router.register(
+    r'mandatory-fund',
+    EnterpriseMandatoryFundViewSet,
+    basename='mandatory-fund'
+)
+
+router.register(
+    r'enterprise-training-reqs',
+    EnterpriseTrainingReqViewSet,
+    basename='enterprise-training-reqs'
+)
+
+router.register(
+    r'training-certificates',
+    TrainingCertificatesViewSet,
+    basename='training-certificates'
+)
 
 mapping_urls = [
     path(
@@ -87,10 +123,16 @@ custom_urls = [
     path('epsakhi-detail/<str:member_code>/', EpsakhiDetailByMemberView.as_view(), name='epsakhi-detail'),
 ]
 
+# Analytics
+analytics_urls = [
+    path('eps-admin-dash/', BeneficiaryEnterpriseAnalyticsView.as_view(), name='eps-admin-dashboard'),
+]
+
 urlpatterns = [
     path('', include(router.urls)),
     *mapping_urls,
     *custom_urls,
+    *analytics_urls,
     path('upsrlm-shg-list/<int:block_id>/', UpsrlmShgListView.as_view(), name='upsrlm-shg-list'),
     path('upsrlm-shg-members/<str:shg_code>/', UpsrlmShgMembersView.as_view(), name='upsrlm-shg-members'),
     path('upsrlm-shg-detail/<str:shg_code>/', UpsrlmShgDetailView.as_view(), name='upsrlm-shg-detail'),
